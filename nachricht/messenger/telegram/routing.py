@@ -146,11 +146,11 @@ def _create_command_handler(
             conditionless_handlers.append(handler)
 
     async def dispatch(update, context):
+        ctx = TelegramContext(update, context, config=router.config)
         # Any user action cleans the global on_reply stash,
         # no matter consumed the signal in it or not.
-        if signal := context.user_data.get("_on_reply"):
-            context.user_data["_on_reply"] = None
-        ctx = TelegramContext(update, context, config=router.config)
+        if signal := ctx.context(ctx.chat).get("_on_reply"):
+            ctx.context(ctx.chat)["_on_reply"] = None
         # Get the message replied to.
         parent_ctx = None
         if parent := ctx.message.parent:
@@ -204,15 +204,16 @@ def _create_callback_query_handler(
     async def wrapped(
         update: Update, context: TelegramContext, *args, **kwargs
     ):
+        ctx = TelegramContext(update, context, config=router.config)
         # Any user action cleans the global on_reply stash,
         # no matter consumed the signal in it or not.
         # BUG: This doesn't work for some reason. Maybe callbacks have different
         # contexts?
-        if signal := context.user_data.get("_on_reply"):
+        if signal := ctx.context(ctx.chat).get("_on_reply"):
             logger.info(
                 "Callback handler found global _on_reply, removing it."
             )
-            context.user_data["_on_reply"] = None
+            ctx.context(ctx.chat)["_on_reply"] = None
         return await wrapped_handler(update, context, *args, **kwargs)
 
     return PTBCallbackQueryHandler(wrapped_handler, pattern=handler.pattern)
@@ -242,8 +243,8 @@ def _create_reaction_handlers(
         ctx = TelegramContext(update, context, config=router.config)
         # Any user action cleans the global on_reply stash,
         # no matter consumed the signal in it or not.
-        if signal := context.user_data.get("_on_reply"):
-            context.user_data["_on_reply"] = None
+        if signal := ctx.context(ctx.chat).get("_on_reply"):
+            ctx.context(ctx.chat)["_on_reply"] = None
         # Get the reply to message.
         tg_parent = update.message_reaction
         parent = Message(
@@ -326,8 +327,8 @@ def _create_message_handlers(
         logging.info("Dispatching message: id=%s", message.id)
         # Here we can do the trick: get the one-time reply-to message id
         # for the user and clear this id right after that.
-        if signal := context.user_data.get("_on_reply"):
-            context.user_data["_on_reply"] = None
+        if signal := ctx.context(ctx.chat).get("_on_reply"):
+            ctx.context(ctx.chat)["_on_reply"] = None
             get_bus().emit(signal, ctx=ctx)
             return
         parent_ctx = None

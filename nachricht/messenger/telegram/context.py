@@ -79,8 +79,16 @@ class TelegramContext(Context):
             return Locale("en")
 
     @property
+    def chat(self) -> Optional[Chat]:
+        if not hasattr(self, "_chat"):
+            logger.debug("Populating context chat.")
+            tg_chat = self._update.effective_chat
+            self._chat = Chat(id=tg_chat.id, _=tg_chat)
+        return self._chat
+
+    @property
     def message(self) -> Optional[Message]:
-        """The message the user sent."""
+        """The message the **user** sent."""
         if not hasattr(self, "_message"):
             logger.debug("Populating context message.")
             tg_message = None
@@ -93,6 +101,8 @@ class TelegramContext(Context):
                 and hasattr(self._update.callback_query, "message")
                 and (tg_message := self._update.callback_query.message)
             ):
+                # WRONG: this is OUR message, not user's.
+                # It should go to the reply.
                 logger.debug("Using the callback message.")
 
             if tg_message:
@@ -103,6 +113,7 @@ class TelegramContext(Context):
                     text=tg_message.text,
                     _=tg_message,
                 )
+                parent = None
                 if tg_reply_to := tg_message.reply_to_message:
                     logger.debug(
                         "Found the reply-to message, populating the parent from it."
@@ -115,6 +126,12 @@ class TelegramContext(Context):
                         _=tg_reply_to,
                     )
                     self._message.parent = parent
+                elif self.context(self.chat).get("_on_reply") and (
+                    parent := self.context(self.chat).get("_on_reply_message")
+                ):
+                    logger.debug("Using global reply-to message.")
+                if parent:
+                    self.message.parent = parent
             else:
                 logger.debug("Couldn't find the message.")
                 self._message = None
@@ -126,8 +143,12 @@ class TelegramContext(Context):
             return self._conversation
         # If the message is ascribed to a conversation, return it.
         if not self.message:
+            # WRONG: there may be no user message but some reply
+            # e.g. callbacks
+            logger.debug("Couldn't find the conversation.")
             return
         if id := self.context(self.message).get("_conversation"):
+            logger.debug("Couldn't find the conversation.")
             return Conversation(id)
         # Otherwise, check its parent message.
         if not self.message.parent:
@@ -305,10 +326,11 @@ class TelegramContext(Context):
     ):
         if on_reply:
             # set global on-reply flag — it will trigger from the next message
-            self._context.user_data["_on_reply"] = on_reply
+            # ?? Why here and not when the message is sent?
+            self.context(self.chat)["_on_reply"] = on_reply
         else:
             # remove the global flag as quick as possible
-            self._context.user_data["_on_reply"] = None
+            self.context(self.chat)["_on_reply"] = None
         if isinstance(text, TranslatableString):
             text = await resolve(text, self.locale)
         tg_message = await self._send_message(
@@ -340,6 +362,7 @@ class TelegramContext(Context):
         if on_reply:
             logger.info("Setting on reply event for message id=%s", message.id)
             self.context(message)["_on_reply"] = on_reply
+            self.context(self.chat)["_on_reply_message"] = message
         if on_reaction:
             logger.debug(
                 "Setting reaction handlers for message id=%s", message.id

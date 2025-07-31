@@ -65,7 +65,7 @@ def check_conditions(
     if not conditions:
         return {}
     # If there are conditions but no context, consider them failed.
-    if len(contexts) == 0 or not contexts[-1]:
+    if len(contexts) == 0 or contexts[-1] is None:
         return None
     # Add extra contexts if provided, with the descending priority
     # (the first context gets the highest priority, the last one gets the lowest).
@@ -201,16 +201,31 @@ class Bus:
             return tasks
 
         for plug in self._plugs[signal_type]:
+            # No conditions means conditions are passed.
+            # Otherwise check them agains the query context.
             if conditions := plug.conditions:
+                logger.debug("Checking plug conditions: %s", conditions)
                 # ??? get all the contexts from the args provided
                 # TERRIBLE LEAK FROM THE CONTEXT LAYER
                 if not (ctx := kwargs.get("ctx")):
                     continue
                 contexts = []
                 if ctx.message:
-                    contexts.append(ctx.context(ctx.message))
+                    c = ctx.context(ctx.message)
+                    logger.debug("Adding message context: %s", c)
+                    contexts.append(c)
                 if ctx.conversation:
-                    contexts.append(ctx.context(ctx.conversation))
+                    c = ctx.context(ctx.conversation)
+                    logger.debug("Adding conversation context: %s", c)
+                    contexts.append(c)
+                if ctx.chat:
+                    c = ctx.context(ctx.chat)
+                    logger.debug("Adding chat context: %s", c)
+                    contexts.append(c)
+                if ctx.account:
+                    c = ctx.context(ctx.account)
+                    logger.debug("Adding account context: %s", c)
+                    contexts.append(c)
                 if check_conditions(conditions, *contexts) is None:
                     continue
 
