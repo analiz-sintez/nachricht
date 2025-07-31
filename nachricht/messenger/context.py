@@ -9,7 +9,7 @@ from typing import (
 )
 from babel import Locale
 
-from core.auth import User
+from nachricht.auth import User
 
 from ..bus import Signal
 from ..i18n import TranslatableString
