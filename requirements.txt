@@ -1,0 +1,14 @@
+Flask[async]
+SQLAlchemy
+SQLAlchemy-Utc
+flask_sqlalchemy
+flask_migrate
+flasgger
+pytest
+pytest-mock
+pytest-asyncio
+python-dotenv
+python-telegram-bot[webhooks]
+openai
+polib
+babel

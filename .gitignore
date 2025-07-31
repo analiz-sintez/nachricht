@@ -1,0 +1,8 @@
+*~
+*.sqlite
+venv*
+**/__pycache__
+.env
+data/images/*.jpg
+data/*.sql
+data/locale/**/*.mo
