@@ -74,13 +74,16 @@ It currently supports only Telegram, with Whatsapp and Matrix on the roadmap.
 ## Setup
 
 Manually:
-```
+```bash
 git clone https://github.com/analiz-sintez/nachricht.git
 pip install -e nachricht/
+# ... or this one if you want pyright to work:
+#     (see https://microsoft.github.io/pyright/#/import-resolution?id=editable-installs)
+pip install -e nachricht/ --config-settings editable_mode=strict
 ```
 
 From `requirements.txt`:
-```
+```bash
 ...
 nachricht  @ git+https://github.com/analiz-sintez/nachricht.git
 ...
@@ -92,7 +95,7 @@ Bug reports and feature requests are very welcome.
 
 If you decide to make a pull request, please make sure that the tests pass after your changes:
 
-```
+```bash
 # Install or update the dependencies
 make venv
 # Run the tests
