@@ -80,81 +80,123 @@ class TelegramContext(Context):
 
     @property
     def chat(self) -> Optional[Chat]:
-        if not hasattr(self, "_chat"):
-            logger.debug("Populating context chat.")
-            tg_chat = self._update.effective_chat
-            self._chat = Chat(id=tg_chat.id, _=tg_chat)
+        if hasattr(self, "_chat"):
+            return self._chat
+        logger.debug("Populating context chat.")
+        tg_chat = self._update.effective_chat
+        self._chat = Chat(id=tg_chat.id, _=tg_chat)
         return self._chat
 
     @property
     def message(self) -> Optional[Message]:
         """The message the **user** sent."""
-        if not hasattr(self, "_message"):
-            logger.debug("Populating context message.")
+        if hasattr(self, "_message"):
+            return self._message
+
+        logger.debug("Populating context message.")
+        # ... user sent a message
+        if hasattr(self._update, "message") and (
+            tg_message := self._update.message
+        ):
+            logger.debug("Using the user message.")
+        # ... user reacted to their own message
+        elif (
+            hasattr(self._update, "message_reaction")
+            and (tg_message := self._update.message_reaction)
+            and (tg_message.from_user.id == self.account.id)
+        ):
+            logger.debug("Using the message the user reacted on.")
+        else:
             tg_message = None
-            if hasattr(self._update, "message") and (
-                tg_message := self._update.message
+
+        if tg_message:
+            self._message = Message(
+                id=tg_message.message_id,
+                chat_id=tg_message.chat.id,
+                user_id=tg_message.from_user.id,
+                text=tg_message.text,
+                _=tg_message,
+            )
+            # Looking for parent message
+            self._message.parent = self.bot_message
+        else:
+            logger.debug("Couldn't find the message.")
+            self._message = None
+
+        return self._message
+
+    @property
+    def bot_message(self) -> Optional[Message]:
+        """The last message that the **bot** sent."""
+        if hasattr(self, "_bot_message"):
+            return self._bot_message
+
+        logger.debug("Populating bot message.")
+        # Looking for parent message
+        message = None
+        # ... global on-reply is active
+        if self.context(self.chat).get("_on_reply") and (
+            message := self.context(self.chat).get("_on_reply_message")
+        ):
+            logger.debug("Using global reply-to message.")
+        else:
+            # ... user replies directly to some message
+            if (
+                hasattr(self._update, "message")
+                and hasattr(self._update.message, "reply_to_message")
+                and (tg_message := self._update.message.reply_to_message)
             ):
-                logger.debug("Using the user message.")
+                logger.debug(
+                    "Found the reply-to message, "
+                    "populating the parent from it."
+                )
+            # ... user presses a button on an inline keyboard
             elif (
                 hasattr(self._update, "callback_query")
                 and hasattr(self._update.callback_query, "message")
                 and (tg_message := self._update.callback_query.message)
             ):
-                # WRONG: this is OUR message, not user's.
-                # It should go to the reply.
                 logger.debug("Using the callback message.")
+            # ... user reacts on a bot's message
+            elif (
+                hasattr(self._update, "message_reaction")
+                and (tg_message := self._update.message_reaction)
+                and (tg_message.from_user.id != self.account.id)
+            ):
+                logger.debug("Using the message the user reacted on.")
+            else:
+                tg_message = None
 
             if tg_message:
-                self._message = Message(
+                message = Message(
                     id=tg_message.message_id,
                     chat_id=tg_message.chat.id,
                     user_id=tg_message.from_user.id,
                     text=tg_message.text,
                     _=tg_message,
                 )
-                parent = None
-                if tg_reply_to := tg_message.reply_to_message:
-                    logger.debug(
-                        "Found the reply-to message, populating the parent from it."
-                    )
-                    parent = Message(
-                        id=tg_reply_to.message_id,
-                        chat_id=tg_reply_to.chat.id,
-                        user_id=tg_reply_to.from_user.id,
-                        text=tg_reply_to.text,
-                        _=tg_reply_to,
-                    )
-                    self._message.parent = parent
-                elif self.context(self.chat).get("_on_reply") and (
-                    parent := self.context(self.chat).get("_on_reply_message")
-                ):
-                    logger.debug("Using global reply-to message.")
-                if parent:
-                    self.message.parent = parent
-            else:
-                logger.debug("Couldn't find the message.")
-                self._message = None
-        return self._message
+        self._bot_message = message
+        return self._bot_message
 
     @property
     def conversation(self) -> Optional[Conversation]:
         if hasattr(self, "_conversation"):
             return self._conversation
+
+        conv = None
         # If the message is ascribed to a conversation, return it.
-        if not self.message:
-            # WRONG: there may be no user message but some reply
-            # e.g. callbacks
-            logger.debug("Couldn't find the conversation.")
-            return
-        if id := self.context(self.message).get("_conversation"):
-            logger.debug("Couldn't find the conversation.")
-            return Conversation(id)
+        if self.message and (
+            id := self.context(self.message).get("_conversation")
+        ):
+            conv = Conversation(id)
         # Otherwise, check its parent message.
-        if not self.message.parent:
-            return
-        if id := self.context(self.message).get("_conversation"):
-            return Conversation(id)
+        elif self.bot_message and (
+            id := self.context(self.bot_message).get("_conversation")
+        ):
+            conv = Conversation(id)
+
+        self._conversation = conv
+        return self._conversation
 
     @conversation.setter
     def conversation(self, value):

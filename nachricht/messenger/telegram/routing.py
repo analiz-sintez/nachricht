@@ -25,7 +25,15 @@ from telegram.ext import (
     filters,
 )
 
-from ...bus import Bus, Signal, unoption, decode, make_regexp, get_bus
+from ...bus import (
+    Bus,
+    Signal,
+    TerminalSignal,
+    unoption,
+    decode,
+    make_regexp,
+    get_bus,
+)
 from ..routing import (
     check_conditions,
     CallbackHandler,
@@ -330,14 +338,16 @@ def _create_message_handlers(
         if signal := ctx.context(ctx.chat).get("_on_reply"):
             ctx.context(ctx.chat)["_on_reply"] = None
             get_bus().emit(signal, ctx=ctx)
-            return
-        parent_ctx = None
-        if parent := message.parent:
-            parent_ctx = ctx.context(parent)
+            if isinstance(signal, TerminalSignal):
+                return
+        elif (parent_ctx := ctx.context(ctx.bot_message)) and (
+            signal := parent_ctx.get("_on_reply")
+        ):
             # Check if a message should emit a signal on reply.
             # (see Context.send_message on_reply argument for details).
-            if signal := parent_ctx.get("_on_reply"):
-                get_bus().emit(signal, ctx=ctx)
+            parent_ctx["_on_reply"] = None
+            get_bus().emit(signal, ctx=ctx)
+            if isinstance(signal, TerminalSignal):
                 return
         # For each handler, check conditions and call if they are met.
         for handler in message_handlers:
@@ -351,7 +361,9 @@ def _create_message_handlers(
             if pattern_match is None:
                 continue
             if (
-                cond_match := check_conditions(handler.conditions, parent_ctx)
+                cond_match := check_conditions(
+                    handler.conditions, ctx.context(ctx.bot_message)
+                )
             ) is None:
                 continue
             logger.info(f"Message handler matched: %s", handler.fn.__name__)

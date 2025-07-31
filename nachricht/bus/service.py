@@ -90,6 +90,11 @@ class Signal:
 
 
 @dataclass
+class TerminalSignal(Signal):
+    pass
+
+
+@dataclass
 class Plug:
     slot: Callable
     conditions: Conditions
