@@ -220,7 +220,7 @@ class TelegramContext(Context):
         self._conversation = value
 
     def context(
-        self, obj: Union[Message, Chat, Account, Conversation]
+        self, obj: Optional[Union[Message, Chat, Account, Conversation]]
     ) -> Dict:
         """
         All this is from current user perspective. Multiple users
@@ -231,7 +231,9 @@ class TelegramContext(Context):
         Chat: chat context;
         User: user context, including a context of one user on another one.
         """
-        if isinstance(obj, Message):
+        if obj is None:
+            return None
+        elif isinstance(obj, Message):
             # Message context is stored in chats telegram context
             store = self._context.chat_data
             key = "_messages"
@@ -248,7 +250,8 @@ class TelegramContext(Context):
             store = self._context.user_data
             key = "_users"
         else:
-            raise TypeError(f"Unsupported type: {type(obj)}.")
+            logger.error(f"Unsupported context type: {type(obj)}.")
+            return None
 
         # ... create the context storage if missing
         if key not in store:
