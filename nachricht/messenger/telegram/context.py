@@ -395,7 +395,8 @@ class TelegramContext(Context):
             self.context(self.chat)["_on_reply"] = on_reply
         else:
             # remove the global flag as quick as possible
-            self.context(self.chat)["_on_reply"] = None
+            # self.context(self.chat)["_on_reply"] = None
+            pass
         if isinstance(text, TranslatableString):
             text = await resolve(text, self.locale)
         tg_message = await self._send_message(

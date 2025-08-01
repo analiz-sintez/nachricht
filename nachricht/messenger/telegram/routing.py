@@ -336,18 +336,18 @@ def _create_message_handlers(
         # Here we can do the trick: get the one-time reply-to message id
         # for the user and clear this id right after that.
         if signal := ctx.context(ctx.chat).get("_on_reply"):
-            ctx.context(ctx.chat)["_on_reply"] = None
-            get_bus().emit(signal, ctx=ctx)
+            await get_bus().emit_and_wait(signal, ctx=ctx)
             if isinstance(signal, TerminalSignal):
+                ctx.context(ctx.chat)["_on_reply"] = None
                 return
         elif (parent_ctx := ctx.context(ctx.bot_message)) and (
             signal := parent_ctx.get("_on_reply")
         ):
             # Check if a message should emit a signal on reply.
             # (see Context.send_message on_reply argument for details).
-            parent_ctx["_on_reply"] = None
-            get_bus().emit(signal, ctx=ctx)
+            await get_bus().emit_and_wait(signal, ctx=ctx)
             if isinstance(signal, TerminalSignal):
+                parent_ctx["_on_reply"] = None
                 return
         # For each handler, check conditions and call if they are met.
         for handler in message_handlers:
@@ -367,7 +367,11 @@ def _create_message_handlers(
             ) is None:
                 continue
             logger.info(f"Message handler matched: %s", handler.fn.__name__)
-            await handler.fn(update, context, **pattern_match, **cond_match)
+            result = await handler.fn(
+                update, context, **pattern_match, **cond_match
+            )
+            ctx.context(ctx.chat)["_on_reply"] = None
+            return result
 
     combined_filters = filters.TEXT & ~filters.COMMAND
     return PTBMessageHandler(combined_filters, dispatch)
