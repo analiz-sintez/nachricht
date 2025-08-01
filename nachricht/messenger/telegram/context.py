@@ -116,13 +116,18 @@ class TelegramContext(Context):
             tg_message := self._update.message
         ):
             logger.debug("Using the user message.")
-        # ... user reacted to their own message
-        elif (
-            hasattr(self._update, "message_reaction")
-            and (tg_message := self._update.message_reaction)
-            and (tg_message.from_user.id == self.account.id)
-        ):
-            logger.debug("Using the message the user reacted on.")
+        # # ... user reacted to their own message
+        # elif (
+        #     hasattr(self._update, "message_reaction")
+        #     and (tg_message := self._update.message_reaction)
+        #     and (tg_message.from_user.id == self.account.id)
+        # ):
+        #     # This doesn't work because `message_reaction` is not
+        #     # a Message object and doesn't have easy access to Message
+        #     # object.
+        #     # We can fix that only if we'll store all the messages
+        #     # on the bot side.
+        #     logger.debug("Using the message the user reacted on.")
         else:
             tg_message = None
 
@@ -175,10 +180,12 @@ class TelegramContext(Context):
             ):
                 logger.debug("Using the callback message.")
             # ... user reacts on a bot's message
+            # TODO: this shouldn't be called `message` since it's a
+            # Reaction object.
             elif (
                 hasattr(self._update, "message_reaction")
                 and (tg_message := self._update.message_reaction)
-                and (tg_message.from_user.id != self.account.id)
+                # and (tg_message.from_user.id != self.account.id)
             ):
                 logger.debug("Using the message the user reacted on.")
             else:
@@ -188,8 +195,8 @@ class TelegramContext(Context):
                 message = Message(
                     id=tg_message.message_id,
                     chat_id=tg_message.chat.id,
-                    user_id=tg_message.from_user.id,
-                    text=tg_message.text,
+                    user_id=None,  # it's our message
+                    text=None,  # tg_message.text, wont work for reactions
                     _=tg_message,
                 )
         self._bot_message = message
