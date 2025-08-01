@@ -260,7 +260,12 @@ async def _translate(
 
     instructions = f"""Translate the following text from {src_language} to {dst_language}.
 Ensure the translation captures the original meaning as accurately as possible.
-If you find any markup in the text, keep it intact."""
+If you find any markup in the text, keep it intact.
+
+Examples (for translations from English to Russian):
+- Continue - Продолжить
+- Exit - Выход
+- Choose Your Language - Выберите язык"""
     if comment:
         instructions += f"\n\n(Context: {comment})"
 
