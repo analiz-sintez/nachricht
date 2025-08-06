@@ -281,7 +281,9 @@ def encode(signal: Signal) -> str:
     values = []
 
     for field, value in zip(fields(signal), astuple(signal)):
-        if isinstance(value, Enum):
+        if value is None:
+            values.append("None")
+        elif isinstance(value, Enum):
             values.append(value.name)
         elif isinstance(value, bool):
             values.append(str(value).lower())
@@ -311,25 +313,29 @@ def make_regexp(signal_type: Type[Signal]) -> str:
     # TODO support lists and dicts of scalar types?
     for field in fields(signal_type):
         attr = field.name
-        attr_type = field.type
-        if is_optional(attr_type):
-            attr_type = unoption(attr_type)
+        if is_optional(field.type):
+            attr_type = unoption(field.type)
+            suffix = "|None"
+        else:
+            attr_type = field.type
+            suffix = ""
+
         if isinstance(attr_type, object) and issubclass(attr_type, Enum):
             # If the attribute is an Enum, match its possible values
             enum_values = "|".join([e.name for e in attr_type])
-            pattern += f":(?P<{attr}>{enum_values})"
+            pattern += f":(?P<{attr}>{enum_values}{suffix})"
         elif attr_type is int:
             # Match digits for integers
-            pattern += f":(?P<{attr}>\\d+)"
+            pattern += f":(?P<{attr}>\\d+{suffix})"
         elif attr_type is float:
             # Match floating point numbers
-            pattern += f":(?P<{attr}>\\d+(\\.\\d+)?)"
+            pattern += f":(?P<{attr}>\\d+(\\.\\d+)?{suffix})"
         elif attr_type is str:
             # Match any non-whitespace characters for strings
-            pattern += f":(?P<{attr}>\\S+)"
+            pattern += f":(?P<{attr}>\\S+{suffix})"
         elif attr_type is bool:
             # Match 'true' or 'false' for boolean
-            pattern += f":(?P<{attr}>true|false)"
+            pattern += f":(?P<{attr}>true|false{suffix})"
         else:
             raise TypeError(f"Unsupported attribute type: {attr_type}")
 
@@ -352,20 +358,27 @@ def decode(signal_type: Type[Signal], string: str) -> Optional[Signal]:
         )
         return None
 
-    # Extract matched attributes
+    # Extract matched field values
     matched_params = match.groupdict()
-    # Convert matched attributes to the correct type and create signal instance
+    # Convert matched field values to the correct type and create signal instance
     signal_params = {}
     for field in fields(signal_type):
         value = matched_params.get(field.name)
+        if is_optional(field.type):
+            field_type = unoption(field.type)
+            if value == "None":
+                continue
+        else:
+            field_type = field.type
+
         if value is not None:
-            if issubclass(field.type, Enum):
-                signal_params[field.name] = field.type[value]
-            elif field.type is int:
+            if issubclass(field_type, Enum):
+                signal_params[field.name] = field_type[value]
+            elif field_type is int:
                 signal_params[field.name] = int(value)
-            elif field.type is float:
+            elif field_type is float:
                 signal_params[field.name] = float(value)
-            elif field.type is bool:
+            elif field_type is bool:
                 signal_params[field.name] = value.lower() == "true"
             else:
                 signal_params[field.name] = value
