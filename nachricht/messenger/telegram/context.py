@@ -44,7 +44,9 @@ def _escape_markdown_v2(text):
         else:  # special char outside link
             return f"\\{match.group(2)}"
 
-    return escape_chars.sub(replacer, text)
+    escaped = escape_chars.sub(replacer, text)
+    logger.debug("Escaping telegram markdown:\n%s\n---\n%s", text, escaped)
+    return escaped
 
 
 class TelegramContext(Context):
