@@ -1,5 +1,4 @@
 import re
-import json
 import asyncio
 import logging
 from inspect import signature, getmodule
@@ -277,43 +276,94 @@ class Bus:
         return await asyncio.gather(*tasks)
 
 
-def _json_encode_default(o: Any) -> Any:
-    """JSON encoder default function to handle specific types."""
-    if isinstance(o, Enum):
-        return o.name
-    raise TypeError(
-        f"Object of type {o.__class__.__name__} is not JSON serializable"
-    )
-
-
 def encode(signal: Signal) -> str:
     """
-    Make a JSON string encoding a signal and all its parameters,
+    Make a string encoding a signal and all its parameters,
     for insertion into a callback field.
-    The format is SignalName:JSON_PAYLOAD.
+    The format is SignalName:value1:value2...
     """
-    signal_name = type(signal).__name__
-    payload = asdict(signal)
-    # Use separators to create a compact JSON string
-    json_payload = json.dumps(
-        payload, default=_json_encode_default, separators=(",", ":")
-    )
-    return f"{signal_name}:{json_payload}"
+    str_values = [type(signal).__name__]
+    for field, value in zip(fields(signal), astuple(signal)):
+        field_base_type = unoption(field.type)
+        if field_base_type != type(value):
+            logger.warning(
+                f"Signal attribute value is {value} has type '{type(value)}', but the declared attr type is '{field_base_type}'. This will cause problems when the encoded siglal will be decoded."
+            )
+        if isinstance(value, Enum):
+            str_values.append(value.name)
+        elif isinstance(value, bool):
+            str_values.append(str(value).lower())
+        elif value is None:
+            str_values.append("")
+        elif isinstance(value, str):
+            if ":" in value:
+                value = f'"{value}"'
+            str_values.append(value)
+        elif isinstance(value, (int, float)):
+            str_values.append(str(value))
+        else:
+            raise TypeError(f"Unsupported attribute type: {type(value)}")
+
+    result = ":".join(str_values)
+
+    # Telegram's callback_data is limited to 64 bytes.
+    if len(result.encode("utf-8")) >= 64:
+        logger.warning(
+            f"Encoded signal '{result}' is {len(result.encode('utf-8'))} bytes and may "
+            "be truncated by messaging platforms (e.g. telegram limit is 64 bytes)."
+        )
+
+    return result
 
 
 def make_regexp(signal_type: Type[Signal]) -> str:
     """
     Make a regexp to parse a signal from its string encoding.
-    The format is `SignalName:JSON_PAYLOAD`.
+    The format is `SignalName` or `SignalName:value1:value2...`.
+
+    E.g.:
+    "CardAnswerShown:1"
+    becomes "^CardAnswerShown:(?P<card_id>\d+)$"
+    "CardAnswerGraded:1:good"
+    becomes "^CardAnswerGraded:(?P<card_id>\d+):(?P<answer>again|hard|good|easy)$"
+
+    Attribute types are taken from signal class definition.
+    Supported are: all scalars, enums.
     """
-    # Use re.escape for safety, in case a signal name contains special regex characters.
-    pattern = f"^{re.escape(signal_type.__name__)}:(.*)$"
-    return pattern
+    name = re.escape(signal_type.__name__)
+    signal_fields = fields(signal_type)
+
+    if not signal_fields:
+        return f"^{name}$"
+
+    parts = []
+    for field in signal_fields:
+        field_name = field.name
+        base_type = unoption(field.type)
+
+        if issubclass(base_type, Enum):
+            enum_keys = "|".join([re.escape(e.name) for e in base_type])
+            pattern_part = f"({enum_keys})"
+        elif base_type is bool:
+            pattern_part = "(true|false)"
+        elif base_type is int:
+            pattern_part = f"(-?\\d+)"
+        elif base_type is float:
+            pattern_part = f"(-?\\d+\\.\\d*)"
+        elif base_type is str:
+            pattern_part = f'([^:]+|".+")'
+        else:
+            raise TypeError(f"Unsupported attribute type: {base_type}")
+
+        quantifier = "?" if is_optional(field.type) else ""
+        parts.append(f"(?P<{field_name}>{pattern_part}{quantifier})")
+
+    return f"^{name}:" + ":".join(parts) + "$"
 
 
 def decode(signal_type: Type[Signal], string: str) -> Optional[Signal]:
     """
-    Parse a string (SignalName:JSON_PAYLOAD) and return a signal
+    Parse a string (SignalName:value1:value2...) and return a signal
     of the given type, or None if the format is not matching or payload is invalid.
     """
     pattern = make_regexp(signal_type)
@@ -321,55 +371,49 @@ def decode(signal_type: Type[Signal], string: str) -> Optional[Signal]:
 
     if not match:
         logger.warning(
-            f"decode: {signal_type.__name__} didn't match against {string}"
+            f"decode: {signal_type.__name__} regex didn't match against '{string}'"
         )
         return None
 
-    json_payload = match.group(1)
-    try:
-        data = json.loads(json_payload)
-        if not isinstance(data, dict):
-            raise TypeError("Decoded JSON payload is not a dictionary.")
-    except (json.JSONDecodeError, TypeError) as e:
-        logger.error(
-            f"Failed to decode or validate JSON payload for {signal_type.__name__}: {e}"
-        )
-        return None
-
-    # Coerce fields that are not native JSON types (e.g., Enums)
+    data = match.groupdict()
+    kwargs: Dict[str, Any] = {}
     try:
         for field in fields(signal_type):
-            field_name = field.name
-            # Check if the field exists in the decoded data and is not None
-            if field_name in data and data[field_name] is not None:
-                # Get the base type, removing Optional wrapper
-                target_type = unoption(field.type)
-                if isinstance(target_type, type) and issubclass(
-                    target_type, Enum
-                ):
-                    # Convert string back to Enum member
-                    enum_str_value = data[field_name]
-                    if not isinstance(enum_str_value, str):
-                        raise TypeError(
-                            f"Enum value for {field_name} must be a string, got {type(enum_str_value)}"
-                        )
-                    data[field_name] = target_type[enum_str_value]
+            str_val = data[field.name]
+            target_type = field.type
+            base_type = unoption(target_type)
 
-    except (KeyError, TypeError) as e:
-        # KeyError for invalid enum name, TypeError for other issues
+            if str_val == "" and is_optional(target_type):
+                kwargs[field.name] = None
+                continue
+
+            if issubclass(base_type, Enum):
+                value = base_type[str_val]
+            elif base_type is bool:
+                value = str_val == "true"
+            elif base_type is int:
+                value = int(str_val)
+            elif base_type is float:
+                value = float(str_val)
+            elif base_type is str:
+                if str_val.startswith('"') and str_val.endswith('"'):
+                    value = str_val[1:-1]
+                else:
+                    value = str_val
+            else:
+                raise TypeError(f"Unsupported attribute type: {base_type}")
+
+            kwargs[field.name] = value
+
+        return signal_type(**kwargs)
+
+    except (ValueError, KeyError) as e:
         logger.error(
-            f"Failed to coerce field for signal {signal_type.__name__}: {e}"
+            f"Failed to coerce field for signal {signal_type.__name__} from data {data}: {e}"
         )
         return None
-
-    try:
-        return signal_type(**data)
     except TypeError as e:
-        # This will catch:
-        # - Mismatched arguments (e.g., extra keys in `data`).
-        # - Missing required arguments (if not in `data`).
-        # - Wrong types for non-enum fields (e.g., str for an int field).
         logger.error(
-            f"Error instantiating signal {signal_type.__name__} from payload {data}: {e}"
+            f"Error instantiating signal {signal_type.__name__} from payload {kwargs}: {e}"
         )
         return None

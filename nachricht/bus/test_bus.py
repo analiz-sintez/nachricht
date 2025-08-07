@@ -103,6 +103,7 @@ def test_bus_encoding(bus):
         param2: str
 
     assert encode(TestSignal(1, "hello")) == "TestSignal:1:hello"
+    assert encode(TestSignal(1, "hello:world")) == 'TestSignal:1:"hello:world"'
 
 
 def test_make_regexp(bus):
@@ -111,7 +112,10 @@ def test_make_regexp(bus):
         param: int
         param2: str
 
-    expected_regexp = r"^TestSignal:(?P<param>\d+):(?P<param2>\S+)$"
+    # expected_regexp = r"^TestSignal:(?P<param>\d+):(?P<param2>\S+)$"
+    expected_regexp = (
+        r'^TestSignal:(?P<param>(-?\d+)):(?P<param2>([^:]+|".+"))$'
+    )
     assert make_regexp(TestSignal) == expected_regexp
 
 
@@ -124,6 +128,13 @@ def test_decode(bus):
     signal_str = "TestSignal:1:hello"
     decoded_signal = decode(TestSignal, signal_str)
     assert decoded_signal == TestSignal(param=1, param2="hello")
+
+    # Test string with colon is quoted and parsed correctly
+    signal_str_with_colon = 'TestSignal:1:"hello:world"'
+    decoded_signal_with_colon = decode(TestSignal, signal_str_with_colon)
+    assert decoded_signal_with_colon == TestSignal(
+        param=1, param2="hello:world"
+    )
 
     # Test with incorrect format
     incorrect_signal_str = "TestSignal:1"
@@ -190,6 +201,43 @@ def test_decode(bus):
     assert decode(BoolSignal, incorrect_bool_signal_str) is None
 
 
+def test_unsupported_field_types_raise_error(bus):
+    """Test that encode and make_regexp raise TypeError for unsupported field types."""
+
+    @dataclass
+    class ComplexObject:
+        a: int
+        b: str
+
+    @dataclass
+    class UnsupportedSignal(Signal):
+        unsupported_field: ComplexObject
+
+    signal_instance = UnsupportedSignal(
+        unsupported_field=ComplexObject(1, "test")
+    )
+
+    with pytest.raises(TypeError, match="Unsupported attribute type"):
+        encode(signal_instance)
+
+    with pytest.raises(TypeError, match="Unsupported attribute type"):
+        make_regexp(UnsupportedSignal)
+
+    # Also test with a dict, which is also unsupported
+    @dataclass
+    class UnsupportedDictSignal(Signal):
+        unsupported_field: dict
+
+    signal_instance_dict = UnsupportedDictSignal(
+        unsupported_field={"key": "value"}
+    )
+    with pytest.raises(TypeError, match="Unsupported attribute type"):
+        encode(signal_instance_dict)
+
+    with pytest.raises(TypeError, match="Unsupported attribute type"):
+        make_regexp(UnsupportedDictSignal)
+
+
 def test_encode_decode_roundtrip(bus):
     @dataclass
     class IntSignal(Signal):
@@ -226,6 +274,12 @@ def test_encode_decode_roundtrip(bus):
     encoded_str_signal = encode(str_signal)
     decoded_str_signal = decode(StrSignal, encoded_str_signal)
     assert decoded_str_signal == str_signal
+
+    # Test with colon in string
+    str_signal_with_colon = StrSignal("hello:world")
+    encoded_str_signal_colon = encode(str_signal_with_colon)
+    decoded_str_signal_colon = decode(StrSignal, encoded_str_signal_colon)
+    assert decoded_str_signal_colon == str_signal_with_colon
 
     class Status(Enum):
         ACTIVE = "active"
