@@ -44,7 +44,9 @@ def _escape_markdown_v2(text):
         else:  # special char outside link
             return f"\\{match.group(2)}"
 
-    return escape_chars.sub(replacer, text)
+    escaped = escape_chars.sub(replacer, text)
+    logger.debug("Escaping telegram markdown:\n%s\n---\n%s", text, escaped)
+    return escaped
 
 
 class TelegramContext(Context):
@@ -395,7 +397,13 @@ class TelegramContext(Context):
         on_reaction: Optional[Dict[Emoji, Union[Signal, List[Signal]]]] = None,
         on_command: Optional[Dict[str, Union[Signal, List[Signal]]]] = None,
         context: Optional[Dict] = None,
+        account: Optional[Account] = None,
+        user: Optional[User] = None,
+        chat: Optional[Chat] = None,
     ):
+        if user or account or chat:
+            # TODO store accounts and chats for users, have a default ones
+            raise NotImplementedError()
         if on_reply:
             # set global on-reply flag — it will trigger from the next message
             # ?? Why here and not when the message is sent?

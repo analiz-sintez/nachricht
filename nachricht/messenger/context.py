@@ -208,6 +208,9 @@ class Context:
         on_reaction: Optional[Dict[Emoji, Union[Signal, List[Signal]]]] = None,
         on_command: Optional[Dict[str, Union[Signal, List[Signal]]]] = None,
         context: Optional[Dict] = None,
+        account: Optional[Account] = None,
+        user: Optional[User] = None,
+        chat: Optional[Chat] = None,
     ):
         """
         Arguments:

@@ -231,13 +231,16 @@ class Bus:
                     c = ctx.context(ctx.account)
                     logger.debug("Adding account context: %s", c)
                     contexts.append(c)
-                if check_conditions(conditions, *contexts) is None:
+                if (match := check_conditions(conditions, *contexts)) is None:
                     continue
+            else:
+                match = {}
 
             slot = plug.slot
             slot_signature = signature(slot)
             relevant_args = {}
 
+            relevant_args.update(match)
             for param in slot_signature.parameters.values():
                 if param.name in signal_dict:
                     relevant_args[param.name] = signal_dict[param.name]
@@ -276,24 +279,47 @@ class Bus:
 def encode(signal: Signal) -> str:
     """
     Make a string encoding a signal and all its parameters,
-    for insertion into callback field.
+    for insertion into a callback field.
+    The format is SignalName:value1:value2...
     """
-    values = []
-
+    str_values = [type(signal).__name__]
     for field, value in zip(fields(signal), astuple(signal)):
+        field_base_type = unoption(field.type)
+        if field_base_type != type(value):
+            logger.warning(
+                f"Signal attribute value is {value} has type '{type(value)}', but the declared attr type is '{field_base_type}'. This will cause problems when the encoded siglal will be decoded."
+            )
         if isinstance(value, Enum):
-            values.append(value.name)
+            str_values.append(value.name)
         elif isinstance(value, bool):
-            values.append(str(value).lower())
+            str_values.append(str(value).lower())
+        elif value is None:
+            str_values.append("")
+        elif isinstance(value, str):
+            if ":" in value:
+                value = f'"{value}"'
+            str_values.append(value)
+        elif isinstance(value, (int, float)):
+            str_values.append(str(value))
         else:
-            values.append(str(value))
+            raise TypeError(f"Unsupported attribute type: {type(value)}")
 
-    return f"{type(signal).__name__}:{':'.join(values)}"
+    result = ":".join(str_values)
+
+    # Telegram's callback_data is limited to 64 bytes.
+    if len(result.encode("utf-8")) >= 64:
+        logger.warning(
+            f"Encoded signal '{result}' is {len(result.encode('utf-8'))} bytes and may "
+            "be truncated by messaging platforms (e.g. telegram limit is 64 bytes)."
+        )
+
+    return result
 
 
 def make_regexp(signal_type: Type[Signal]) -> str:
     """
-    Make a regexp to parse signal attributes from its string encoding.
+    Make a regexp to parse a signal from its string encoding.
+    The format is `SignalName` or `SignalName:value1:value2...`.
 
     E.g.:
     "CardAnswerShown:1"
@@ -304,70 +330,90 @@ def make_regexp(signal_type: Type[Signal]) -> str:
     Attribute types are taken from signal class definition.
     Supported are: all scalars, enums.
     """
-    # Start the regular expression pattern with the signal name
-    pattern = f"^{signal_type.__name__}"
+    name = re.escape(signal_type.__name__)
+    signal_fields = fields(signal_type)
 
-    # Iterate through the fields to match each attribute
-    # TODO support lists and dicts of scalar types?
-    for field in fields(signal_type):
-        attr = field.name
-        attr_type = field.type
-        if is_optional(attr_type):
-            attr_type = unoption(attr_type)
-        if isinstance(attr_type, object) and issubclass(attr_type, Enum):
-            # If the attribute is an Enum, match its possible values
-            enum_values = "|".join([e.name for e in attr_type])
-            pattern += f":(?P<{attr}>{enum_values})"
-        elif attr_type is int:
-            # Match digits for integers
-            pattern += f":(?P<{attr}>\\d+)"
-        elif attr_type is float:
-            # Match floating point numbers
-            pattern += f":(?P<{attr}>\\d+(\\.\\d+)?)"
-        elif attr_type is str:
-            # Match any non-whitespace characters for strings
-            pattern += f":(?P<{attr}>\\S+)"
-        elif attr_type is bool:
-            # Match 'true' or 'false' for boolean
-            pattern += f":(?P<{attr}>true|false)"
+    if not signal_fields:
+        return f"^{name}$"
+
+    parts = []
+    for field in signal_fields:
+        field_name = field.name
+        base_type = unoption(field.type)
+
+        if issubclass(base_type, Enum):
+            enum_keys = "|".join([re.escape(e.name) for e in base_type])
+            pattern_part = f"({enum_keys})"
+        elif base_type is bool:
+            pattern_part = "(true|false)"
+        elif base_type is int:
+            pattern_part = f"(-?\\d+)"
+        elif base_type is float:
+            pattern_part = f"(-?\\d+\\.\\d*)"
+        elif base_type is str:
+            pattern_part = f'([^:]+|".+")'
         else:
-            raise TypeError(f"Unsupported attribute type: {attr_type}")
+            raise TypeError(f"Unsupported attribute type: {base_type}")
 
-    pattern += "$"
-    return pattern
+        quantifier = "?" if is_optional(field.type) else ""
+        parts.append(f"(?P<{field_name}>{pattern_part}{quantifier})")
+
+    return f"^{name}:" + ":".join(parts) + "$"
 
 
 def decode(signal_type: Type[Signal], string: str) -> Optional[Signal]:
     """
-    Parse a string according to signal type and return
-    a signal of this type, or None if the format is not matching.
+    Parse a string (SignalName:value1:value2...) and return a signal
+    of the given type, or None if the format is not matching or payload is invalid.
     """
-    # Get the regular expression pattern for the signal type
     pattern = make_regexp(signal_type)
     match = re.match(pattern, string)
 
     if not match:
         logger.warning(
-            f"decode: {signal_type.__name__} didn't match against {string}"
+            f"decode: {signal_type.__name__} regex didn't match against '{string}'"
         )
         return None
 
-    # Extract matched attributes
-    matched_params = match.groupdict()
-    # Convert matched attributes to the correct type and create signal instance
-    signal_params = {}
-    for field in fields(signal_type):
-        value = matched_params.get(field.name)
-        if value is not None:
-            if issubclass(field.type, Enum):
-                signal_params[field.name] = field.type[value]
-            elif field.type is int:
-                signal_params[field.name] = int(value)
-            elif field.type is float:
-                signal_params[field.name] = float(value)
-            elif field.type is bool:
-                signal_params[field.name] = value.lower() == "true"
-            else:
-                signal_params[field.name] = value
+    data = match.groupdict()
+    kwargs: Dict[str, Any] = {}
+    try:
+        for field in fields(signal_type):
+            str_val = data[field.name]
+            target_type = field.type
+            base_type = unoption(target_type)
 
-    return signal_type(**signal_params)
+            if str_val == "" and is_optional(target_type):
+                kwargs[field.name] = None
+                continue
+
+            if issubclass(base_type, Enum):
+                value = base_type[str_val]
+            elif base_type is bool:
+                value = str_val == "true"
+            elif base_type is int:
+                value = int(str_val)
+            elif base_type is float:
+                value = float(str_val)
+            elif base_type is str:
+                if str_val.startswith('"') and str_val.endswith('"'):
+                    value = str_val[1:-1]
+                else:
+                    value = str_val
+            else:
+                raise TypeError(f"Unsupported attribute type: {base_type}")
+
+            kwargs[field.name] = value
+
+        return signal_type(**kwargs)
+
+    except (ValueError, KeyError) as e:
+        logger.error(
+            f"Failed to coerce field for signal {signal_type.__name__} from data {data}: {e}"
+        )
+        return None
+    except TypeError as e:
+        logger.error(
+            f"Error instantiating signal {signal_type.__name__} from payload {kwargs}: {e}"
+        )
+        return None
