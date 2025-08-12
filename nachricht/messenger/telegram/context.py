@@ -388,7 +388,7 @@ class TelegramContext(Context):
 
     async def send_message(
         self,
-        text: Union[str, TranslatableString],
+        text: Optional[Union[str, TranslatableString]],
         markup: Optional[Keyboard] = None,
         image: Optional[str] = None,
         new: bool = False,
@@ -414,6 +414,8 @@ class TelegramContext(Context):
             pass
         if isinstance(text, TranslatableString):
             text = await resolve(text, self.locale)
+        elif text is None:
+            text = ""
         tg_message = await self._send_message(
             self._update,
             self._context,
