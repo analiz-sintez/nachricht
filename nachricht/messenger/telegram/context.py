@@ -345,8 +345,8 @@ class TelegramContext(Context):
                 ):  # Fallback to edit_caption if edit_text fails (e.g. previous was photo)
                     message = await message.edit_caption(
                         caption=text,
-                        parse_mode=ParseMode.MARKDOWN,
                         reply_markup=markup,
+                        parse_mode=parse_mode,
                     )
         else:
             # Sending a new message
@@ -434,6 +434,9 @@ class TelegramContext(Context):
                 ),
             )
         except BadRequest as e:
+            logger.warning(
+                "Markdown v2 parse error, trying with MARKDOWN parse mode."
+            )
             tg_message = await self._send_message(
                 self._update,
                 self._context,
