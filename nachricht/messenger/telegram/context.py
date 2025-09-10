@@ -6,6 +6,7 @@ import logging
 from babel import Locale
 from telegram.ext import CallbackContext
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram import (
     Update,
     InputMediaPhoto,
@@ -33,7 +34,7 @@ from ...i18n import TranslatableString, resolve
 logger = logging.getLogger(__name__)
 
 
-to_escape = r"[]()#+-={}.!]"
+to_escape = r"[]()<>{}#+-=.!"
 escape_chars = re.compile(rf"""(\[.*?\]\(.*?\))|([{re.escape(to_escape)}])""")
 
 
@@ -282,9 +283,13 @@ class TelegramContext(Context):
         image: Optional[str] = None,
         new: bool = False,
         reply_to: Optional[Union[PTBMessage, bool]] = None,
+        parse_mode: Optional[str] = None,
     ):
         """Send or update a message, with or without an image."""
-        if self.parse_mode == ParseMode.MARKDOWN_V2:
+        if not parse_mode:
+            parse_mode = self.parse_mode
+
+        if parse_mode == ParseMode.MARKDOWN_V2:
             text = _escape_markdown_v2(text)
 
         if image and not self.config.IMAGE["enable"]:
@@ -300,11 +305,11 @@ class TelegramContext(Context):
             message = update.callback_query.message
             if image:
                 try:
-                    await message.edit_media(
+                    message = await message.edit_media(
                         media=InputMediaPhoto(
                             media=open(image, "rb"),
                             caption=text,
-                            parse_mode=self.parse_mode,
+                            parse_mode=parse_mode,
                         ),
                         reply_markup=markup,
                     )
@@ -315,9 +320,9 @@ class TelegramContext(Context):
                     logger.warning(
                         f"Failed to edit media (possibly same image): {e}. Trying to edit caption."
                     )
-                    await message.edit_caption(
+                    message = await message.edit_caption(
                         caption=text,
-                        parse_mode=self.parse_mode,
+                        parse_mode=parse_mode,
                         reply_markup=markup,
                     )
             else:
@@ -330,17 +335,17 @@ class TelegramContext(Context):
                 # This might require deleting the old message and sending a new one if media type changes from photo to text.
                 # For now, let's assume we can edit the text or caption.
                 try:
-                    await message.edit_text(  # Handles case where previous message was text
+                    message = await message.edit_text(  # Handles case where previous message was text
                         text=text,
                         reply_markup=markup,
-                        parse_mode=self.parse_mode,
+                        parse_mode=parse_mode,
                     )
                 except (
                     Exception
                 ):  # Fallback to edit_caption if edit_text fails (e.g. previous was photo)
-                    await message.edit_caption(
+                    message = await message.edit_caption(
                         caption=text,
-                        parse_mode=self.parse_mode,
+                        parse_mode=ParseMode.MARKDOWN,
                         reply_markup=markup,
                     )
         else:
@@ -357,7 +362,7 @@ class TelegramContext(Context):
                     photo=open(image, "rb"),
                     caption=text,
                     reply_markup=markup,
-                    parse_mode=self.parse_mode,
+                    parse_mode=parse_mode,
                     reply_to_message_id=effective_reply_to_message_id,
                 )
             else:
@@ -365,7 +370,7 @@ class TelegramContext(Context):
                     chat_id=update.effective_chat.id,
                     text=text,
                     reply_markup=markup,
-                    parse_mode=self.parse_mode,
+                    parse_mode=parse_mode,
                     reply_to_message_id=effective_reply_to_message_id,
                 )
         return message
@@ -416,15 +421,32 @@ class TelegramContext(Context):
             text = await resolve(text, self.locale)
         elif text is None:
             text = ""
-        tg_message = await self._send_message(
-            self._update,
-            self._context,
-            text,
-            image=image,
-            markup=await self._make_keyboard(markup) if markup else None,
-            new=new,
-            reply_to=reply_to._ if isinstance(reply_to, Message) else reply_to,
-        )
+        try:
+            tg_message = await self._send_message(
+                self._update,
+                self._context,
+                text,
+                image=image,
+                markup=await self._make_keyboard(markup) if markup else None,
+                new=new,
+                reply_to=(
+                    reply_to._ if isinstance(reply_to, Message) else reply_to
+                ),
+            )
+        except BadRequest as e:
+            tg_message = await self._send_message(
+                self._update,
+                self._context,
+                text,
+                image=image,
+                markup=await self._make_keyboard(markup) if markup else None,
+                new=new,
+                reply_to=(
+                    reply_to._ if isinstance(reply_to, Message) else reply_to
+                ),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+
         message = Message(
             id=tg_message.message_id,
             chat_id=tg_message.chat.id,
