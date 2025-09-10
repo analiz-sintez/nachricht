@@ -293,3 +293,72 @@ def test_encode_decode_roundtrip(bus):
     encoded_enum_signal = encode(enum_signal)
     decoded_enum_signal = decode(EnumSignal, encoded_enum_signal)
     assert decoded_enum_signal == enum_signal
+
+
+@pytest.mark.asyncio
+async def test_deferred_connection(bus):
+    @dataclass
+    class DeferredSignal(Signal):
+        value: str
+
+    mock_slot = AsyncMock()
+
+    @bus.on("DeferredSignal")
+    async def deferred_slot(value: str):
+        await mock_slot(value)
+
+    # Before setup, connection is deferred.
+    assert len(bus._deferred_connections) == 1
+    assert not bus._plugs.get(DeferredSignal)
+
+    # Emitting does nothing.
+    tasks = bus.emit(DeferredSignal(value="initial"))
+    await asyncio.gather(*tasks)
+    mock_slot.assert_not_awaited()
+
+    # Setup discovers signals and resolves connections.
+    bus.setup()
+
+    # Connection is now resolved.
+    assert not bus._deferred_connections
+    assert deferred_slot in [p.slot for p in bus._plugs[DeferredSignal]]
+
+    # Emitting now calls the slot.
+    tasks = bus.emit(DeferredSignal(value="final"))
+    await asyncio.gather(*tasks)
+    mock_slot.assert_awaited_once_with("final")
+
+
+def test_create_signal_by_name(bus):
+    @dataclass
+    class MySignal(Signal):
+        id: int
+        username: str
+
+    bus.register(MySignal)
+    signal_instance = bus.signal("MySignal", id=123, username="test")
+
+    assert isinstance(signal_instance, MySignal)
+    assert signal_instance.id == 123
+    assert signal_instance.username == "test"
+
+
+def test_create_signal_by_name_unknown_signal(bus):
+    with pytest.raises(
+        ValueError, match="Unknown signal type: 'NonExistentSignal'"
+    ):
+        bus.signal("NonExistentSignal")
+
+
+def test_create_signal_by_name_wrong_args(bus):
+    @dataclass
+    class AnotherSignal(Signal):
+        value: int
+
+    bus.register(AnotherSignal)
+
+    with pytest.raises(TypeError):
+        bus.signal("AnotherSignal", 1, 2)  # Too many args
+
+    with pytest.raises(TypeError):
+        bus.signal("AnotherSignal", wrong_kw="test")  # Wrong keyword
