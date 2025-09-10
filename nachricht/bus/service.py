@@ -95,6 +95,13 @@ class TerminalSignal(Signal):
 
 
 @dataclass
+class DeferredConnection:
+    signal_name: str
+    slot: Callable
+    conditions: Conditions
+
+
+@dataclass
 class Plug:
     slot: Callable
     conditions: Conditions
@@ -109,6 +116,8 @@ class Bus:
         ] = None,
     ):
         self._plugs: Dict[Type[Signal], List[Plug]] = dict()
+        self._signal_types: Dict[str, Type[Signal]] = {}
+        self._deferred_connections: List[DeferredConnection] = []
         self._save_signal = saving_backend
         self.config = config
 
@@ -128,26 +137,120 @@ class Bus:
             descendants.update(cls.signals(sub))
         return descendants
 
+    def discover_signals(self):
+        """
+        Finds all defined Signal subclasses and registers them.
+        This is necessary to be able to create signals by name
+        even if they don't have any handlers connected yet.
+        """
+        logger.debug("Discovering all signal types...")
+        for signal_type in self.signals():
+            self.register(signal_type)
+        logger.debug("Signal discovery complete.")
+
+    def resolve_deferred_connections(self):
+        """Connect all slots that were deferred."""
+        if not self._deferred_connections:
+            return
+
+        logger.debug(
+            f"Resolving {len(self._deferred_connections)} deferred connections..."
+        )
+        for conn in self._deferred_connections:
+            signal_type = self.get_signal_type(conn.signal_name)
+            if not signal_type:
+                logger.error(
+                    f"Cannot resolve deferred connection for slot '{conn.slot.__name__}' "
+                    f"to signal '{conn.signal_name}': signal type not found."
+                )
+                continue
+            self.connect(signal_type, conn.slot, conn.conditions)
+
+        resolved_count = len(self._deferred_connections)
+        self._deferred_connections = []
+        logger.debug(f"Resolved {resolved_count} connections.")
+
+    def setup(self):
+        """
+        Should be called once at application startup after all modules
+        containing signals and handlers have been imported.
+
+        This method discovers all signal types and connects handlers
+        that were declared using a string name (deferred connections).
+        """
+        logger.info(
+            "Setting up Bus: discovering signals and resolving connections."
+        )
+        self.discover_signals()
+        self.resolve_deferred_connections()
+        logger.info("Bus setup complete.")
+
     def register(self, signal_type: Type[Signal]):
-        """Register a signal."""
+        """Register a signal type so it can be referenced by name."""
         if not issubclass(signal_type, Signal):
             raise TypeError(
                 "You should inherit your signals from Signal class."
                 " It allows to track all the signals tree of the application."
             )
+
+        name = signal_type.__name__
+        if (
+            name in self._signal_types
+            and self._signal_types[name] is not signal_type
+        ):
+            existing = self._signal_types[name]
+            logger.warning(
+                f"Duplicate signal name '{name}'. "
+                f"Existing: {getmodule(existing).__name__}.{existing.__name__}, "
+                f"New: {getmodule(signal_type).__name__}.{name}. Overwriting."
+            )
+        self._signal_types[name] = signal_type
+
         if signal_type not in self._plugs:
             self._plugs[signal_type] = []
-            logger.info(f"Registered signal type: {signal_type.__name__}")
+            logger.info(f"Registered signal type: {name}")
+
+    def get_signal_type(self, name: str) -> Optional[Type[Signal]]:
+        """Find a registered signal type by name."""
+        return self._signal_types.get(name)
+
+    def signal(self, name: str, *args, **kwargs) -> Signal:
+        """
+        Create a signal instance by its name and arguments.
+        This allows emitting signals without direct import of the signal class,
+        preventing circular dependencies.
+        """
+        signal_type = self.get_signal_type(name)
+        if not signal_type:
+            all_known = ", ".join(sorted(self._signal_types.keys()))
+            raise ValueError(
+                f"Unknown signal type: '{name}'. Known signals: {all_known or 'None'}"
+            )
+        try:
+            return signal_type(*args, **kwargs)
+        except TypeError as e:
+            raise TypeError(
+                f"Error creating signal '{name}' with args={args} kwargs={kwargs}: {e}"
+            ) from e
 
     def on(
         self,
-        signal_type: Type[Signal],
+        signal_type_or_name: Union[Type[Signal], str],
         conditions: Conditions = {},
     ):
         """Make a decorator which connects a signal to any slot."""
 
         def _wrapper(slot: Callable) -> Callable:
-            self.connect(signal_type, slot, conditions)
+            if isinstance(signal_type_or_name, str):
+                deferred = DeferredConnection(
+                    signal_type_or_name, slot, conditions
+                )
+                self._deferred_connections.append(deferred)
+                logger.debug(
+                    f"Deferred connection of {slot.__name__} to signal '{signal_type_or_name}'"
+                )
+            else:
+                self.connect(signal_type_or_name, slot, conditions)
             return slot
 
         return _wrapper
