@@ -457,6 +457,8 @@ def attach_bus(bus: Bus, application: Application):
         handler = PTBCallbackQueryHandler(decode_and_emit, pattern=pattern)
         return handler
 
+    bus.setup()
+
     logging.info("Bus: registering signal handlers.")
     for signal_type in bus.signals():
         module_name = getmodule(signal_type).__name__
@@ -465,4 +467,5 @@ def attach_bus(bus: Bus, application: Application):
             f"Bus: registering a handler for {module_name}.{signal_name}."
         )
         application.add_handler(make_handler(signal_type))
+
     logging.info("Bus: all signals registered.")
