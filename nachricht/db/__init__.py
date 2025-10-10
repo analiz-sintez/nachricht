@@ -2,7 +2,8 @@ import logging
 from datetime import datetime
 from typing import Union, Dict, List, TypeAlias, Annotated
 
-from sqlalchemy.orm import mapped_column, DeclarativeBase
+from sqlalchemy.orm import Query, mapped_column, DeclarativeBase
+from sqlalchemy.sql import Select
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.types import JSON
 from sqlalchemy.ext.mutable import MutableDict
@@ -76,15 +77,15 @@ class OptionsMixin:
         return d
 
 
-def log_sql_query(query) -> None:
+def log_sql_query(query: Union[Query, Select]) -> None:
     """
     Log the SQL query statement if available.
 
     Args:
         query: SQLAlchemy query object.
     """
-    if query is not None:
-        query_text = str(
-            query.statement.compile(compile_kwargs={"literal_binds": True})
-        )
-        logger.debug("SQL Query: %s", query_text)
+    if isinstance(query, Query):
+        query = query.statement
+
+    query_text = str(query.compile(compile_kwargs={"literal_binds": True}))
+    logger.debug("SQL Query: %s", query_text)
