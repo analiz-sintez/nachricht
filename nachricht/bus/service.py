@@ -1,4 +1,6 @@
 import re
+import time
+import traceback
 import asyncio
 import logging
 from inspect import signature, getmodule
@@ -18,6 +20,10 @@ from typing import (
     Union,
 )
 from inspect import signature
+
+from .signal import Signal, TerminalSignal
+from .backends import AbstractSavingBackend, NoOpBackend
+
 
 logger = logging.getLogger(__name__)
 
@@ -85,16 +91,6 @@ def check_conditions(
 
 
 @dataclass
-class Signal:
-    pass
-
-
-@dataclass
-class TerminalSignal(Signal):
-    pass
-
-
-@dataclass
 class DeferredConnection:
     signal_name: str
     slot: Callable
@@ -111,21 +107,13 @@ class Bus:
     def __init__(
         self,
         config: Optional[object] = None,
-        saving_backend: Optional[
-            Callable[[Signal, list[Callable]], None]
-        ] = None,
+        saving_backend: Optional[AbstractSavingBackend] = None,
     ):
         self._plugs: Dict[Type[Signal], List[Plug]] = dict()
         self._signal_types: Dict[str, Type[Signal]] = {}
         self._deferred_connections: List[DeferredConnection] = []
-        self._save_signal = saving_backend
+        self._saving_backend = saving_backend or NoOpBackend()
         self.config = config
-
-    def save_signal(self, signal):
-        if not self._save_signal:
-            return
-        plugs = self._plugs.get(type(signal), [])
-        self._save_signal(signal, [p.slot for p in plugs])
 
     @classmethod
     def signals(cls, signal_type: Type[Signal] = Signal):
@@ -300,15 +288,49 @@ class Bus:
         except Exception as e:
             logging.error(f"Exception in background task: {e}", exc_info=True)
 
+    async def _execute_and_log_slot(
+        self,
+        slot: Callable,
+        args: Dict,
+        emitted_signal_id: Any,
+    ):
+        start_time = time.monotonic()
+        status = "success"
+        error_message = None
+        try:
+            await slot(**args)
+        except Exception:
+            status = "error"
+            error_message = traceback.format_exc()
+            logger.error(
+                f"Error executing slot {slot.__name__}", exc_info=True
+            )
+            raise  # Re-raise for emit_and_wait and task handlers
+        finally:
+            end_time = time.monotonic()
+            duration_ms = (end_time - start_time) * 1000
+            self._saving_backend.log_slot_execution(
+                emitted_signal_id=emitted_signal_id,
+                slot=slot,
+                status=status,
+                duration_ms=duration_ms,
+                error_message=error_message,
+            )
+
     def _dispatch_signal_to_slots(self, signal, **kwargs):
         signal_type = type(signal)
         signal_dict = asdict(signal)
 
         tasks = []
-        if signal_type not in self._plugs:
+        plugs = self._plugs.get(signal_type, [])
+        if not plugs:
             return tasks
 
-        for plug in self._plugs[signal_type]:
+        emitted_signal_id = self._saving_backend.log_signal_emitted(
+            signal, [p.slot for p in plugs]
+        )
+
+        for plug in plugs:
             # No conditions means conditions are passed.
             # Otherwise check them agains the query context.
             if conditions := plug.conditions:
@@ -350,7 +372,10 @@ class Bus:
                 elif param.name in kwargs:
                     relevant_args[param.name] = kwargs[param.name]
 
-            tasks.append(asyncio.create_task(slot(**relevant_args)))
+            wrapper_coro = self._execute_and_log_slot(
+                slot, relevant_args, emitted_signal_id
+            )
+            tasks.append(asyncio.create_task(wrapper_coro))
 
         return tasks
 
@@ -359,7 +384,6 @@ class Bus:
         Fire-and-forget: Schedules slots and returns immediately.
         Exceptions in slots will be logged, not raised.
         """
-        self.save_signal(signal)
         module_name = getmodule(signal).__name__
         logger.info(f"SIGNAL (fire-and-forget): {module_name}.{signal}")
         tasks = self._dispatch_signal_to_slots(signal, **kwargs)
@@ -372,7 +396,6 @@ class Bus:
         Schedules slots and waits for them all to complete.
         Raises the first exception encountered in a slot.
         """
-        self.save_signal(signal)
         module_name = getmodule(signal).__name__
         logger.info(f"SIGNAL (with waiting): {module_name}.{signal}")
         tasks = self._dispatch_signal_to_slots(signal, **kwargs)

@@ -1,7 +1,9 @@
 from typing import Optional
-from .service import (
+from .signal import (
     Signal,
     TerminalSignal,
+)
+from .service import (
     Bus,
     encode,
     decode,
@@ -10,7 +12,7 @@ from .service import (
     check_conditions,
     Conditions,
 )
-from .saving_backends import dump_signal_to_log, dump_signal_to_db
+from .backends import LogFileBackend, DatabaseBackend
 
 bus: Optional[Bus] = None
 
@@ -18,9 +20,9 @@ bus: Optional[Bus] = None
 def create_bus(config: object):
     global bus
     if config.SIGNALS["logging_backend"] == "db":
-        bus = Bus(saving_backend=dump_signal_to_db, config=config)
+        bus = Bus(saving_backend=DatabaseBackend(), config=config)
     elif config.SIGNALS["logging_backend"] == "log":
-        bus = Bus(saving_backend=dump_signal_to_log, config=config)
+        bus = Bus(saving_backend=LogFileBackend(), config=config)
     else:
         raise NotImplementedError(
             "Unknown config option for signals logging: %s"
