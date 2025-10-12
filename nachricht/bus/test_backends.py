@@ -13,7 +13,7 @@ from nachricht.bus.backends import (
     LogFileBackend,
     DatabaseBackend,
     EmittedSignal,
-    SlotExecutionLog,
+    SlotCall,
 )
 
 
@@ -150,7 +150,7 @@ class TestDatabaseBackend:
             error_message=None,
         )
 
-        log_entry = SlotExecutionLog.query.one()
+        log_entry = SlotCall.query.one()
         assert log_entry.emitted_signal_id == signal_id
         assert log_entry.slot_name == "my_test_slot"
         assert log_entry.status == "success"
@@ -165,4 +165,4 @@ class TestDatabaseBackend:
             status="success",
             duration_ms=10.0,
         )
-        assert SlotExecutionLog.query.count() == 0
+        assert SlotCall.query.count() == 0

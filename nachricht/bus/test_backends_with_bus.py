@@ -13,7 +13,7 @@ from nachricht.bus.backends import (
     LogFileBackend,
     DatabaseBackend,
     EmittedSignal,
-    SlotExecutionLog,
+    SlotCall,
 )
 from nachricht.bus import Bus, encode, decode, make_regexp
 
@@ -105,10 +105,10 @@ class TestBusAndBackendIntegration:
         mock_slot.assert_awaited_once_with(data="db test")
 
         assert EmittedSignal.query.count() == 1
-        assert SlotExecutionLog.query.count() == 1
+        assert SlotCall.query.count() == 1
 
         signal_entry = EmittedSignal.query.one()
-        slot_entry = SlotExecutionLog.query.one()
+        slot_entry = SlotCall.query.one()
 
         assert signal_entry.signal_type == "IntegrationTestSignal"
         assert signal_entry.signal_fields["data"] == "db test"
@@ -129,7 +129,7 @@ class TestBusAndBackendIntegration:
         with pytest.raises(ValueError, match="It failed"):
             await bus.emit_and_wait(IntegrationTestSignal(data="fail"))
 
-        slot_entry = SlotExecutionLog.query.one()
+        slot_entry = SlotCall.query.one()
         assert slot_entry.status == "error"
         assert slot_entry.duration_ms >= 0
         assert "ValueError: It failed" in slot_entry.error_message

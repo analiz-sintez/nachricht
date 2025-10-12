@@ -12,7 +12,7 @@ from .service import (
     check_conditions,
     Conditions,
 )
-from .backends import LogFileBackend, DatabaseBackend
+from .backends import LogFileBackend, DatabaseBackend, EmittedSignal, SlotCall
 
 bus: Optional[Bus] = None
 

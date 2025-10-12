@@ -40,8 +40,8 @@ class EmittedSignal(Model):
     slots = mapped_column(MutableList.as_mutable(JSON))
 
 
-class SlotExecutionLog(Model):
-    __tablename__ = "slot_execution_logs"
+class SlotCall(Model):
+    __tablename__ = "slot_calls"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     emitted_signal_id: Mapped[int]
@@ -179,7 +179,7 @@ class DatabaseBackend(AbstractSavingBackend):
         if emitted_signal_id is None:
             return  # Can't log without a parent signal ID
 
-        log_entry = SlotExecutionLog(
+        log_entry = SlotCall(
             emitted_signal_id=emitted_signal_id,
             slot_name=slot.__name__,
             status=status,
