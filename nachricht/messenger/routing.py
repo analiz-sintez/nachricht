@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class Handler:
+class Peg:
     """
     A generic peg: a mapping from the messenger event to the reaction (a function)
     that should happen (be invoked) in the bot app in response to that event.
@@ -45,8 +45,8 @@ class Handler:
 
 
 @dataclass
-class Command(Handler):
-    """A generic definition for a command handler."""
+class CommandPeg(Peg):
+    """A generic peg for a command."""
 
     name: str
     args: list[str]
@@ -54,22 +54,22 @@ class Command(Handler):
 
 
 @dataclass
-class MessageHandler(Handler):
-    """A generic definition for a message handler."""
+class MessagePeg(Peg):
+    """A generic peg for a message."""
 
     pattern: Union[str, re.Pattern, Callable]
 
 
 @dataclass
-class ReactionHandler(Handler):
-    """A generic definition for a reaction handler."""
+class ReactionPeg(Peg):
+    """A generic peg for a reaction."""
 
     emojis: list[Emoji]
 
 
 @dataclass
-class CallbackHandler(Handler):
-    """A generic definition for a callback query handler."""
+class CallbackPeg(Peg):
+    """A generic peg for a callback."""
 
     pattern: str
 
@@ -87,10 +87,10 @@ class Router:
 
     def __init__(self, config: Optional[object] = None):
         self.config = config
-        self.command_handlers: list[Command] = []
-        self.callback_query_handlers: list[CallbackHandler] = []
-        self.reaction_handlers: list[ReactionHandler] = []
-        self.message_handlers: list[MessageHandler] = []
+        self.command_pegs: list[CommandPeg] = []
+        self.callback_pegs: list[CallbackPeg] = []
+        self.reaction_pegs: list[ReactionPeg] = []
+        self.message_pegs: list[MessagePeg] = []
 
     def command(
         self,
@@ -100,34 +100,44 @@ class Router:
         conditions: Optional[Conditions] = None,
     ) -> Callable:
         """
-        A decorator to register a command handler.
+        Register a command peg: attach a command event to a function.
+        (This is a decorator.)
         """
 
         def decorator(fn: Callable) -> Callable:
-            logger.debug(f"Registering command: /{name}: {description}")
-            handler_def = Command(
+            logger.info(
+                f"Adding command peg: /%s: %s to %s.",
+                name,
+                description,
+                fn.__name__,
+            )
+            peg = CommandPeg(
                 fn=fn,
                 name=name,
                 args=args,
                 description=description,
                 conditions=conditions,
             )
-            self.command_handlers.append(handler_def)
+            self.command_pegs.append(peg)
             return fn
 
         return decorator
 
     def callback_query(self, pattern: str) -> Callable:
         """
-        A decorator to register a callback query handler based on a regex pattern.
+        Register a callback peg based on a regex pattern:
+        attach a callback query event to a function.
+        (This is a decorator.)
         """
 
         def decorator(fn: Callable) -> Callable:
-            logger.debug(f"Registering callback query with pattern: {pattern}")
-            handler_def = CallbackHandler(
-                fn=fn, pattern=pattern, conditions=None
+            logger.info(
+                f"Adding callback peg with pattern %s to %s",
+                pattern,
+                fn.__name__,
             )
-            self.callback_query_handlers.append(handler_def)
+            peg = CallbackPeg(fn=fn, pattern=pattern, conditions=None)
+            self.callback_pegs.append(peg)
             return fn
 
         return decorator
@@ -138,15 +148,19 @@ class Router:
         conditions: Optional[Conditions] = None,
     ) -> Callable:
         """
-        A decorator to register a reaction handler based on reactions list.
+        Register a reaction peg: attach a reaction event with an emoji from
+        the list to a certain function.
+        (This is a decorator.)
         """
 
         def decorator(fn: Callable) -> Callable:
-            logger.debug(f"Registering reaction handler for emojis: {emojis}")
-            handler_def = ReactionHandler(
-                fn=fn, emojis=emojis, conditions=conditions
+            logger.info(
+                f"Adding reaction peg added for emojis %s to %s.",
+                emojis,
+                fn.__name__,
             )
-            self.reaction_handlers.append(handler_def)
+            peg = ReactionPeg(fn=fn, emojis=emojis, conditions=conditions)
+            self.reaction_pegs.append(peg)
             return fn
 
         return decorator
@@ -157,16 +171,19 @@ class Router:
         conditions: Optional[Conditions] = None,
     ) -> Callable:
         """
-        A decorator to register a message handler based on a regex pattern or a filter function.
+        Register a message peg: attach a message event with a text
+        matching a given regex pattern or a filter callable to a certain function.
+        (This is a decorator.)
         """
 
         def decorator(fn: Callable) -> Callable:
-            logger.debug(f"Registering message with pattern: {pattern}")
-            handler_def = MessageHandler(
-                fn=fn, pattern=pattern, conditions=conditions
+            logger.info(
+                f"Adding message peg with pattern %s to %s.",
+                pattern,
+                fn.__name__,
             )
-            self.message_handlers.append(handler_def)
-            logger.info("Message handler added for %s.", fn.__name__)
+            peg = MessagePeg(fn=fn, pattern=pattern, conditions=conditions)
+            self.message_pegs.append(peg)
             return fn
 
         return decorator

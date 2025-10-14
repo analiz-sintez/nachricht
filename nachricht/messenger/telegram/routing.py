@@ -36,10 +36,10 @@ from ...bus import (
 )
 from ..routing import (
     check_conditions,
-    CallbackHandler,
-    Command,
-    MessageHandler,
-    ReactionHandler,
+    CallbackPeg,
+    CommandPeg,
+    MessagePeg,
+    ReactionPeg,
     Router,
     Conditions,
 )
@@ -164,7 +164,7 @@ def _handle_global_on_reply(ctx: TelegramContext):
 
 
 def _create_command_handler(
-    name: str, handlers: List[Command], router: Router
+    name: str, pegs: List[CommandPeg], router: Router
 ) -> PTBCommandHandler:
     """
     Create a *single* telegram.CommandHandler for a bunch of
@@ -175,13 +175,13 @@ def _create_command_handler(
     # `is_final` property which terminates the search.
     # Or sort handlers based on conditions count, search from the ones with
     # many conditions first, and terminate the search if we found something.
-    conditional_handlers = []
-    conditionless_handlers = []
-    for handler in handlers:
-        if handler.conditions:
-            conditional_handlers.append(handler)
+    conditional_pegs = []
+    conditionless_pegs = []
+    for peg in pegs:
+        if peg.conditions:
+            conditional_pegs.append(peg)
         else:
-            conditionless_handlers.append(handler)
+            conditionless_pegs.append(peg)
 
     async def dispatch(update: Update, context: TelegramContext):
         ctx = TelegramContext(update, context, config=router.config)
@@ -212,26 +212,24 @@ def _create_command_handler(
                     return
 
         found = False
-        for handler in conditional_handlers:
+        for peg in conditional_pegs:
             # Check the message context condition.
-            if (
-                match := check_conditions(handler.conditions, parent_ctx)
-            ) is None:
+            if (match := check_conditions(peg.conditions, parent_ctx)) is None:
                 continue
             logger.info(f"Handler matched for command {name}: {match}.")
             found = True
-            await handler.fn(update, context, reply_to=parent, **match)
+            await peg.fn(update, context, reply_to=parent, **match)
         if found:
             return
-        for handler in conditionless_handlers:
+        for peg in conditionless_pegs:
             logger.info(f"Calling conditionless handler for command {name}.")
-            await handler.fn(update, context, reply_to=parent)
+            await peg.fn(update, context, reply_to=parent)
 
     return PTBCommandHandler(name, dispatch)
 
 
 def _create_reaction_handler(
-    handlers: List[ReactionHandler],
+    pegs: List[ReactionPeg],
     router: Router,
 ) -> PTBReactionHandler:
     """
@@ -242,13 +240,13 @@ def _create_reaction_handler(
     deletions but for simplicity we don't process them.
     """
     # Build a mapping of emojis to handlers
-    emoji_map: Dict[Emoji, List[ReactionHandler]] = {}
-    for handler in handlers:
-        handler.fn = _wrap_function(handler.fn, router=router)
-        for emoji in handler.emojis:
+    emoji_map: Dict[Emoji, List[ReactionPeg]] = {}
+    for peg in pegs:
+        peg.fn = _wrap_function(peg.fn, router=router)
+        for emoji in peg.emojis:
             if emoji not in emoji_map:
                 emoji_map[emoji] = []
-            emoji_map[emoji].append(handler)
+            emoji_map[emoji].append(peg)
 
     async def dispatch(update: Update, context: TelegramContext):
         ctx = TelegramContext(update, context, config=router.config)
@@ -287,15 +285,13 @@ def _create_reaction_handler(
                     "Can't send message reaction signals, the bus is not ready."
                 )
         # Check common handlers registered directly.
-        for handler in emoji_map.get(emoji, []):
+        for peg in emoji_map.get(emoji, []):
             # Check the message context condition.
-            if (
-                match := check_conditions(handler.conditions, parent_ctx)
-            ) is None:
+            if (match := check_conditions(peg.conditions, parent_ctx)) is None:
                 continue
             # TODO this should not await, just shoot and forget
             logger.info(f"Handler matched for emoji {emoji}: {match}.")
-            await handler.fn(
+            await peg.fn(
                 update, context, emoji=emoji, reply_to=parent, **match
             )
 
@@ -303,12 +299,11 @@ def _create_reaction_handler(
 
 
 def _create_message_handler(
-    message_handlers: List[MessageHandler],
+    pegs: List[MessagePeg],
     router: Router,
 ) -> PTBMessageHandler:
     """
-    Combile all MessageHandlers and register them as a single
-    telegram.ext.MessageHandler.
+    Combile all MessagePegs and register them as a single MessageHandler.
     """
 
     def find_named_groups(pat: re.Pattern, string: str) -> Optional[Dict]:
@@ -318,17 +313,14 @@ def _create_message_handler(
             return None
         return {key: match.group(key) for key in pat.groupindex.keys()}
 
-    # Preprocess message handelrs:
-    for handler in message_handlers:
+    # Preprocess message pegs:
+    for peg in pegs:
         # ... wrap the function
-        handler.fn = _wrap_function(handler.fn, router)
+        peg.fn = _wrap_function(peg.fn, router)
         # ... prepare the pattern
-        if isinstance(handler.pattern, str):
-            handler.pattern = re.compile(handler.pattern)
-        if not (
-            callable(handler.pattern)
-            or isinstance(handler.pattern, re.Pattern)
-        ):
+        if isinstance(peg.pattern, str):
+            peg.pattern = re.compile(peg.pattern)
+        if not (callable(peg.pattern) or isinstance(peg.pattern, re.Pattern)):
             raise ValueError("Pattern must be a regexp or a callable.")
 
     async def dispatch(update: Update, context: TelegramContext):
@@ -351,25 +343,23 @@ def _create_message_handler(
             if isinstance(signal, TerminalSignal):
                 parent_ctx["_on_reply"] = None
                 return
-        # For each handler, check conditions and call if they are met.
-        for handler in message_handlers:
+        # For each peg, check conditions and call if they are met.
+        for peg in pegs:
             pattern_match = None
-            if isinstance(handler.pattern, re.Pattern):
-                pattern_match = find_named_groups(
-                    handler.pattern, message.text
-                )
-            elif callable(handler.pattern):
-                pattern_match = handler.pattern(message.text)
+            if isinstance(peg.pattern, re.Pattern):
+                pattern_match = find_named_groups(peg.pattern, message.text)
+            elif callable(peg.pattern):
+                pattern_match = peg.pattern(message.text)
             if pattern_match is None:
                 continue
             if (
                 cond_match := check_conditions(
-                    handler.conditions, ctx.context(ctx.bot_message)
+                    peg.conditions, ctx.context(ctx.bot_message)
                 )
             ) is None:
                 continue
-            logger.info(f"Message handler matched: %s", handler.fn.__name__)
-            result = await handler.fn(
+            logger.info(f"Message handler matched: %s", peg.fn.__name__)
+            result = await peg.fn(
                 update, context, **pattern_match, **cond_match
             )
             ctx.context(ctx.chat)["_on_reply"] = None
@@ -380,35 +370,23 @@ def _create_message_handler(
 
 
 def _create_callback_query_handler(
-    handler: CallbackHandler,
+    peg: CallbackPeg,
     router: Router,
 ) -> PTBCallbackQueryHandler:
-    """Creates a telegram.ext.CallbackQueryHandler from a CallbackHandler dataclass."""
-    wrapped_handler = _wrap_function(handler.fn, router)
+    """Creates a CallbackQueryHandler from a CallbackPeg dataclass."""
+    fn = _wrap_function(peg.fn, router)
 
-    @wraps(wrapped_handler)
+    @wraps(fn)
     async def wrapped(
         update: Update, context: TelegramContext, *args, **kwargs
     ):
         ctx = TelegramContext(update, context, config=router.config)
         # Any user action cleans the global on_reply stash,
         # no matter consumed the signal in it or not.
-        # BUG: This doesn't work for some reason. Maybe callbacks have different
-        # contexts?
-        logging.critical(
-            "Callback handler clears the _on_reply state from chat %i",
-            ctx.chat.id,
-        )
-        if signal := ctx.context(ctx.chat).get("_on_reply"):
-            logging.critical(
-                "Callback handler clears the _on_reply state from chat %i",
-                ctx.chat.id,
-            )
-            ctx.context(ctx.chat)["_on_reply"] = None
+        _handle_global_on_reply(ctx)
+        return await fn(update, context, *args, **kwargs)
 
-        return await wrapped_handler(update, context, *args, **kwargs)
-
-    return PTBCallbackQueryHandler(wrapped, pattern=handler.pattern)
+    return PTBCallbackQueryHandler(wrapped, pattern=peg.pattern)
 
 
 def attach_router(router: Router, application: Application):
@@ -422,28 +400,22 @@ def attach_router(router: Router, application: Application):
     # Commands:
     # ... for each command gather all registered handlers.
     command_map = {}
-    for handler in router.command_handlers:
-        if handler.name not in command_map:
-            command_map[handler.name] = []
-        handler.fn = _wrap_command(handler.fn, handler.args, router)
-        command_map[handler.name].append(handler)
+    for peg in router.command_pegs:
+        if peg.name not in command_map:
+            command_map[peg.name] = []
+        peg.fn = _wrap_command(peg.fn, peg.args, router)
+        command_map[peg.name].append(peg)
     # ... and register them as a single Telegram handler
-    for command_name, handlers in command_map.items():
-        handler = _create_command_handler(command_name, handlers, router)
+    for command_name, pegs in command_map.items():
+        handler = _create_command_handler(command_name, pegs, router)
         application.add_handler(handler)
         logger.debug(f"Command handler added for '/{command_name}'")
 
-    # Messages:
-    # ... register them all at once to avoid "only first matched is called" rule
-    handler = _create_message_handler(router.message_handlers, router)
-    application.add_handler(handler)
-    logger.debug(f"Message handlers added.")
-
-    # Set all commands with their descriptions for the bot menu
+    # ... set all commands with their descriptions for the bot menu
     # ... TODO resolve translatable strings
     bot_commands = [
         BotCommand(cmd.name, str(cmd.description or cmd.name))
-        for cmd in router.command_handlers
+        for cmd in router.command_pegs
     ]
 
     async def set_commands(application: Application):
@@ -453,22 +425,28 @@ def attach_router(router: Router, application: Application):
         application.post_init = set_commands
         logger.debug("Bot command descriptions set: %s", bot_commands)
 
+    # Messages:
+    # ... register them all at once to avoid "only first matched is called" rule
+    handler = _create_message_handler(router.message_pegs, router)
+    application.add_handler(handler)
+    logger.debug(f"Message handlers added.")
+
     # Reactions:
     # ... this is a special case. PTB doesn't support dispatching on emoji types,
     #     so we register a single handler which does this dispatch.
-    if router.reaction_handlers:
+    if router.reaction_pegs:
         application.add_handler(
-            _create_reaction_handler(router.reaction_handlers, router)
+            _create_reaction_handler(router.reaction_pegs, router)
         )
 
     # Callbacks:
     # ... TODO This is RUDIMENTARY as ALL callbacks should be processed by the bus!
     #     Maybe the router doesn't need callback_query_handlers property at all?
-    for callback_handler in router.callback_query_handlers:
-        handler = _create_callback_query_handler(callback_handler, router)
+    for peg in router.callback_pegs:
+        handler = _create_callback_query_handler(peg, router)
         application.add_handler(handler)
         logger.debug(
-            f"Callback query handler added for pattern: {callback_handler.pattern}"
+            f"Callback query handler added for pattern: {peg.pattern}"
         )
 
 
