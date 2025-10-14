@@ -35,7 +35,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Handler:
-    """A generic handler."""
+    """
+    A generic peg: a mapping from the messenger event to the reaction (a function)
+    that should happen (be invoked) in the bot app in response to that event.
+    """
 
     fn: Callable
     conditions: Optional[Conditions]
@@ -77,6 +80,9 @@ class Router:
 
     It is messenger-agnostic and gathers handlers in a declarative form,
     which can then be attached to a specific messenger implementation.
+
+    Router is a bootstrap-time entity, not the runtime one. After it has
+    attached all the handlers to a chat adapter, it leaves the show.
     """
 
     def __init__(self, config: Optional[object] = None):

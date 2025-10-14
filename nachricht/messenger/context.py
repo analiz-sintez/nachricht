@@ -172,6 +172,12 @@ class Context:
 
     @property
     def message(self) -> Optional[Message]:
+        """The message the **user** sent."""
+        raise NotImplementedError()
+
+    @property
+    def bot_message(self) -> Optional[Message]:
+        """The last message that the **bot** sent."""
         raise NotImplementedError()
 
     @property

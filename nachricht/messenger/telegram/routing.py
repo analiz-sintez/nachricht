@@ -50,7 +50,9 @@ logger = logging.getLogger(__name__)
 
 
 def _coerce(arg: str, hint):
-    """Coerce a string argument to function type hint."""
+    """
+    Coerce a string argument to a function type hint.
+    """
     # Get the actual type.
     hint = unoption(hint)
     # Coerce arg to that if we can.
@@ -71,10 +73,12 @@ def _coerce(arg: str, hint):
     return coerced
 
 
-def _wrap_fn_with_args(fn: Callable, router: Router) -> Callable:
+def _wrap_function(fn: Callable, router: Router) -> Callable:
     """
-    A helper function to wrap the handler function
-    and extract named groups from regex matches for its arguments, coercing types.
+    Isolate the function from the PTB update and context objects:
+    - fetch all the matched regexp named groups from the update object
+      into the kwargs;
+    - coerce the kwargs according to the function signature.
     """
     type_hints = get_type_hints(fn)
 
@@ -98,17 +102,21 @@ def _wrap_fn_with_args(fn: Callable, router: Router) -> Callable:
     return wrapped
 
 
-def _wrap_command_fn(
+def _wrap_command(
     fn: Callable, arg_names: list[str], router: Router
 ) -> Callable:
     """
-    A helper function to wrap a command handler, parsing and coercing
-    positional arguments from the message.
+    Isolate the function from the PTB update and context objects:
+    - fetch the command positional arguments, if any, and append them
+      to the kwargs;
+    - coerce the kwargs according to the function signature.
     """
     type_hints = get_type_hints(fn)
 
     @wraps(fn)
-    async def wrapped(update, context, **outer_kwargs):
+    async def wrapped(
+        update: Update, context: TelegramContext, **outer_kwargs
+    ):
         if len(arg_names) == 1:
             args = [update.message.text.split(" ", 1)[1]]
         elif len(arg_names) > 1:
@@ -132,14 +140,36 @@ def _wrap_command_fn(
     return wrapped
 
 
+def _handle_global_on_reply(ctx: TelegramContext):
+    """
+    Global on-reply is a mode which allows to connect a user input message
+    to a bot message, e.g. for editing items. It's a replacement for input
+    fields which are missing in messengers.
+
+    The state is global and thus should be cleared after any user action
+    not connected to the current message.
+
+    !! Hey, not every callback should clear this flag! Only the callback
+    bound to a button on the message to which the reply goes! If I have two
+    "widgets", and the latter asks me to input smth, I want to be able to
+    freely check smth on the former one.
+    """
+    if signal := ctx.context(ctx.chat).get("_on_reply"):
+        logging.critical(
+            "Clearing the _on_reply state from chat %i",
+            ctx.chat.id,
+        )
+        ctx.context(ctx.chat)["_on_reply"] = None
+        return signal
+
+
 def _create_command_handler(
     name: str, handlers: List[Command], router: Router
 ) -> PTBCommandHandler:
     """
-    Creates a *single* telegram.CommandHandler for a bunch of
-    CommandHandler dataclasses.
-    They may have different conditions, e.g. on message context.
-
+    Create a *single* telegram.CommandHandler for a bunch of
+    CommandHandler dataclasses. They may have different conditions,
+    e.g. depend on message context.
     """
     # TODO: this logic is too primitive. Maybe we should have
     # `is_final` property which terminates the search.
@@ -153,12 +183,11 @@ def _create_command_handler(
         else:
             conditionless_handlers.append(handler)
 
-    async def dispatch(update, context):
+    async def dispatch(update: Update, context: TelegramContext):
         ctx = TelegramContext(update, context, config=router.config)
         # Any user action cleans the global on_reply stash,
         # no matter consumed the signal in it or not.
-        if signal := ctx.context(ctx.chat).get("_on_reply"):
-            ctx.context(ctx.chat)["_on_reply"] = None
+        signal = _handle_global_on_reply(ctx)
         # Get the message replied to.
         parent_ctx = None
         if parent := ctx.message.parent:
@@ -201,33 +230,7 @@ def _create_command_handler(
     return PTBCommandHandler(name, dispatch)
 
 
-def _create_callback_query_handler(
-    handler: CallbackHandler,
-    router: Router,
-) -> PTBCallbackQueryHandler:
-    """Creates a telegram.ext.CallbackQueryHandler from a CallbackHandler dataclass."""
-    wrapped_handler = _wrap_fn_with_args(handler.fn, router)
-
-    @wraps(wrapped_handler)
-    async def wrapped(
-        update: Update, context: TelegramContext, *args, **kwargs
-    ):
-        ctx = TelegramContext(update, context, config=router.config)
-        # Any user action cleans the global on_reply stash,
-        # no matter consumed the signal in it or not.
-        # BUG: This doesn't work for some reason. Maybe callbacks have different
-        # contexts?
-        if signal := ctx.context(ctx.chat).get("_on_reply"):
-            logger.info(
-                "Callback handler found global _on_reply, removing it."
-            )
-            ctx.context(ctx.chat)["_on_reply"] = None
-        return await wrapped_handler(update, context, *args, **kwargs)
-
-    return PTBCallbackQueryHandler(wrapped_handler, pattern=handler.pattern)
-
-
-def _create_reaction_handlers(
+def _create_reaction_handler(
     handlers: List[ReactionHandler],
     router: Router,
 ) -> PTBReactionHandler:
@@ -241,7 +244,7 @@ def _create_reaction_handlers(
     # Build a mapping of emojis to handlers
     emoji_map: Dict[Emoji, List[ReactionHandler]] = {}
     for handler in handlers:
-        handler.fn = _wrap_fn_with_args(handler.fn, router=router)
+        handler.fn = _wrap_function(handler.fn, router=router)
         for emoji in handler.emojis:
             if emoji not in emoji_map:
                 emoji_map[emoji] = []
@@ -251,8 +254,7 @@ def _create_reaction_handlers(
         ctx = TelegramContext(update, context, config=router.config)
         # Any user action cleans the global on_reply stash,
         # no matter consumed the signal in it or not.
-        if signal := ctx.context(ctx.chat).get("_on_reply"):
-            ctx.context(ctx.chat)["_on_reply"] = None
+        signal = _handle_global_on_reply(ctx)
         # Get the reply to message.
         tg_parent = update.message_reaction
         parent = Message(
@@ -300,13 +302,13 @@ def _create_reaction_handlers(
     return PTBReactionHandler(dispatch)
 
 
-def _create_message_handlers(
+def _create_message_handler(
     message_handlers: List[MessageHandler],
     router: Router,
 ) -> PTBMessageHandler:
     """
-    Combile all MessageHandlers and register them
-    as onr telegram.ext.MessageHandler.
+    Combile all MessageHandlers and register them as a single
+    telegram.ext.MessageHandler.
     """
 
     def find_named_groups(pat: re.Pattern, string: str) -> Optional[Dict]:
@@ -319,7 +321,7 @@ def _create_message_handlers(
     # Preprocess message handelrs:
     for handler in message_handlers:
         # ... wrap the function
-        handler.fn = _wrap_fn_with_args(handler.fn, router)
+        handler.fn = _wrap_function(handler.fn, router)
         # ... prepare the pattern
         if isinstance(handler.pattern, str):
             handler.pattern = re.compile(handler.pattern)
@@ -377,42 +379,68 @@ def _create_message_handlers(
     return PTBMessageHandler(combined_filters, dispatch)
 
 
+def _create_callback_query_handler(
+    handler: CallbackHandler,
+    router: Router,
+) -> PTBCallbackQueryHandler:
+    """Creates a telegram.ext.CallbackQueryHandler from a CallbackHandler dataclass."""
+    wrapped_handler = _wrap_function(handler.fn, router)
+
+    @wraps(wrapped_handler)
+    async def wrapped(
+        update: Update, context: TelegramContext, *args, **kwargs
+    ):
+        ctx = TelegramContext(update, context, config=router.config)
+        # Any user action cleans the global on_reply stash,
+        # no matter consumed the signal in it or not.
+        # BUG: This doesn't work for some reason. Maybe callbacks have different
+        # contexts?
+        logging.critical(
+            "Callback handler clears the _on_reply state from chat %i",
+            ctx.chat.id,
+        )
+        if signal := ctx.context(ctx.chat).get("_on_reply"):
+            logging.critical(
+                "Callback handler clears the _on_reply state from chat %i",
+                ctx.chat.id,
+            )
+            ctx.context(ctx.chat)["_on_reply"] = None
+
+        return await wrapped_handler(update, context, *args, **kwargs)
+
+    return PTBCallbackQueryHandler(wrapped, pattern=handler.pattern)
+
+
 def attach_router(router: Router, application: Application):
     """
     Attach the stored handlers from a generic Router to the Telegram application.
     """
     logger.info("Attaching handlers to the application.")
 
-    # Process and add command handlers
-    # For each command gather all registered handlers.
+    # Process and add handlers
+
+    # Commands:
+    # ... for each command gather all registered handlers.
     command_map = {}
     for handler in router.command_handlers:
         if handler.name not in command_map:
             command_map[handler.name] = []
-        handler.fn = _wrap_command_fn(handler.fn, handler.args, router)
+        handler.fn = _wrap_command(handler.fn, handler.args, router)
         command_map[handler.name].append(handler)
-
+    # ... and register them as a single Telegram handler
     for command_name, handlers in command_map.items():
         handler = _create_command_handler(command_name, handlers, router)
         application.add_handler(handler)
         logger.debug(f"Command handler added for '/{command_name}'")
 
-    # Process and add callback query handlers
-    for callback_handler in router.callback_query_handlers:
-        handler = _create_callback_query_handler(callback_handler, router)
-        application.add_handler(handler)
-        logger.debug(
-            f"Callback query handler added for pattern: {callback_handler.pattern}"
-        )
-
-    # Process and add message handlers
-    # register them all at once to avoid "only first matched is called" rule
-    handler = _create_message_handlers(router.message_handlers, router)
+    # Messages:
+    # ... register them all at once to avoid "only first matched is called" rule
+    handler = _create_message_handler(router.message_handlers, router)
     application.add_handler(handler)
     logger.debug(f"Message handlers added.")
 
     # Set all commands with their descriptions for the bot menu
-    # TODO resolve translatable strings
+    # ... TODO resolve translatable strings
     bot_commands = [
         BotCommand(cmd.name, str(cmd.description or cmd.name))
         for cmd in router.command_handlers
@@ -425,12 +453,22 @@ def attach_router(router: Router, application: Application):
         application.post_init = set_commands
         logger.debug("Bot command descriptions set: %s", bot_commands)
 
-    # Set up a reactions handler.
-    # This is a special case. PTB doesn't support dispatching on emoji types,
-    # so we register a single handler which does this dispatch.
+    # Reactions:
+    # ... this is a special case. PTB doesn't support dispatching on emoji types,
+    #     so we register a single handler which does this dispatch.
     if router.reaction_handlers:
         application.add_handler(
-            _create_reaction_handlers(router.reaction_handlers, router)
+            _create_reaction_handler(router.reaction_handlers, router)
+        )
+
+    # Callbacks:
+    # ... TODO This is RUDIMENTARY as ALL callbacks should be processed by the bus!
+    #     Maybe the router doesn't need callback_query_handlers property at all?
+    for callback_handler in router.callback_query_handlers:
+        handler = _create_callback_query_handler(callback_handler, router)
+        application.add_handler(handler)
+        logger.debug(
+            f"Callback query handler added for pattern: {callback_handler.pattern}"
         )
 
 
@@ -450,6 +488,7 @@ def attach_bus(bus: Bus, application: Application):
                 logger.warning(f"Decoding {signal_name} failed.")
                 return
             ctx = TelegramContext(update, context, config=bus.config)
+            _handle_global_on_reply(ctx)
             await bus.emit_and_wait(signal, ctx=ctx)
 
         pattern = make_regexp(signal_type)
