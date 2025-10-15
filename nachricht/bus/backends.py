@@ -38,6 +38,7 @@ class EmittedSignal(Model):
     signal_type: Mapped[str]
     signal_fields = mapped_column(MutableDict.as_mutable(JSON))
     slots = mapped_column(MutableList.as_mutable(JSON))
+    peg_trigger_id: Mapped[Optional[int]]
 
 
 class SlotCall(Model):
@@ -58,7 +59,12 @@ class AbstractSavingBackend(ABC):
     """
 
     @abstractmethod
-    def log_signal_emitted(self, signal: Signal, slots: List[Callable]) -> Any:
+    def log_signal_emitted(
+        self,
+        signal: Signal,
+        slots: List[Callable],
+        trace_id: Optional[Any] = None,
+    ) -> Any:
         """
         Logs that a signal has been emitted.
 
@@ -87,7 +93,10 @@ class NoOpBackend(AbstractSavingBackend):
     """A backend that does nothing. The default."""
 
     def log_signal_emitted(
-        self, signal: Signal, slots: List[Callable]
+        self,
+        signal: Signal,
+        slots: List[Callable],
+        trace_id: Optional[Any] = None,
     ) -> None:
         return None
 
@@ -106,12 +115,16 @@ class LogFileBackend(AbstractSavingBackend):
     """A backend that writes structured logs to the standard logger."""
 
     def log_signal_emitted(
-        self, signal: Signal, slots: List[Callable]
+        self,
+        signal: Signal,
+        slots: List[Callable],
+        trace_id: Optional[Any] = None,
     ) -> uuid.UUID:
         emitted_signal_id = uuid.uuid4()
         signal_dump = {
             "event": "signal_emitted",
             "emitted_signal_id": str(emitted_signal_id),
+            "trace_id": str(trace_id) if trace_id else None,
             "signal_type": type(signal).__name__,
             "signal_fields": {
                 k: encode_field(v) for k, v in asdict(signal).items()
@@ -145,7 +158,10 @@ class DatabaseBackend(AbstractSavingBackend):
     """A backend that saves signals and slot executions to the database."""
 
     def log_signal_emitted(
-        self, signal: Signal, slots: List[Callable]
+        self,
+        signal: Signal,
+        slots: List[Callable],
+        trace_id: Optional[Any] = None,
     ) -> Optional[int]:
         emitted_signal = EmittedSignal(
             ts=datetime.now(timezone.utc),
@@ -154,6 +170,7 @@ class DatabaseBackend(AbstractSavingBackend):
                 k: encode_field(v) for k, v in asdict(signal).items()
             },
             slots=[slot.__name__ for slot in slots],
+            peg_trigger_id=trace_id,
         )
         try:
             db.session.add(emitted_signal)

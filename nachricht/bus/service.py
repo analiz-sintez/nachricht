@@ -3,6 +3,7 @@ import time
 import traceback
 import asyncio
 import logging
+from contextvars import ContextVar
 from inspect import signature, getmodule
 from dataclasses import dataclass, asdict, astuple, fields
 from enum import Enum
@@ -23,6 +24,10 @@ from inspect import signature
 
 from .signal import Signal, TerminalSignal
 from .backends import AbstractSavingBackend, NoOpBackend
+
+
+# This variable will hold the trace ID for the lifetime of a single request.
+trace_id_var: ContextVar[Optional[Any]] = ContextVar("trace_id", default=None)
 
 
 logger = logging.getLogger(__name__)
@@ -326,8 +331,9 @@ class Bus:
         if not plugs:
             return tasks
 
+        trace_id = trace_id_var.get()
         emitted_signal_id = self._saving_backend.log_signal_emitted(
-            signal, [p.slot for p in plugs]
+            signal, [p.slot for p in plugs], trace_id=trace_id
         )
 
         for plug in plugs:

@@ -18,6 +18,7 @@ from typing import (
 )
 
 from .context import Context, Message, Emoji
+from .tracing import AbstractPegTracer, NoOpPegTracer
 from ..auth import get_user, User
 from ..i18n import TranslatableString, resolve
 from ..bus import check_conditions, Conditions
@@ -85,12 +86,61 @@ class Router:
     attached all the handlers to a chat adapter, it leaves the show.
     """
 
-    def __init__(self, config: Optional[object] = None):
+    def __init__(
+        self,
+        config: Optional[object] = None,
+        peg_tracer: Optional[AbstractPegTracer] = None,
+    ):
         self.config = config
+        self._peg_tracer = peg_tracer or NoOpPegTracer()
         self.command_pegs: list[CommandPeg] = []
         self.callback_pegs: list[CallbackPeg] = []
         self.reaction_pegs: list[ReactionPeg] = []
         self.message_pegs: list[MessagePeg] = []
+
+    def _create_tracing_decorator(
+        self, peg_type: str, peg_identifier: str
+    ) -> Callable:
+        """A factory that creates a decorator for tracing peg execution."""
+
+        def decorator(fn: Callable) -> Callable:
+            if not self._peg_tracer:
+                return fn  # If no tracer is configured, return the original function
+
+            @wraps(fn)
+            async def wrapper(*args, **kwargs):
+                peg_trigger = {
+                    "peg_type": peg_type,
+                    "peg_identifier": peg_identifier,
+                    "handler": fn,  # Log the original unwrapped function
+                }
+                # Find the context object from the arguments passed to the handler.
+                # This is the key to making the decorator generic.
+                ctx = None
+                # Search in kwargs first as it's more common
+                if "ctx" in kwargs and isinstance(kwargs["ctx"], Context):
+                    ctx = kwargs["ctx"]
+                else:
+                    # Fallback to searching positional args
+                    for arg in args:
+                        if isinstance(arg, Context):
+                            ctx = arg
+                            break
+                if ctx:
+                    # We have the context, so we can trace the event.
+                    peg_trigger["context_info"] = {
+                        "chat_id": ctx.chat.id if ctx.chat else None,
+                        "user_id": ctx.account.id if ctx.account else None,
+                    }
+
+                self._peg_tracer.trace_peg_trigger(**peg_trigger)
+
+                # Execute the original handler function
+                return await fn(*args, **kwargs)
+
+            return wrapper
+
+        return decorator
 
     def command(
         self,
@@ -111,8 +161,12 @@ class Router:
                 description,
                 fn.__name__,
             )
+            tracing_decorator = self._create_tracing_decorator(
+                peg_type="command", peg_identifier=name
+            )
+            traced_fn = tracing_decorator(fn)
             peg = CommandPeg(
-                fn=fn,
+                fn=traced_fn,
                 name=name,
                 args=args,
                 description=description,
@@ -136,7 +190,11 @@ class Router:
                 pattern,
                 fn.__name__,
             )
-            peg = CallbackPeg(fn=fn, pattern=pattern, conditions=None)
+            tracing_decorator = self._create_tracing_decorator(
+                peg_type="callback_query", peg_identifier=pattern
+            )
+            traced_fn = tracing_decorator(fn)
+            peg = CallbackPeg(fn=traced_fn, pattern=pattern, conditions=None)
             self.callback_pegs.append(peg)
             return fn
 
@@ -159,7 +217,14 @@ class Router:
                 emojis,
                 fn.__name__,
             )
-            peg = ReactionPeg(fn=fn, emojis=emojis, conditions=conditions)
+            tracing_decorator = self._create_tracing_decorator(
+                peg_type="reaction",
+                peg_identifier=",".join(e.value for e in emojis),
+            )
+            traced_fn = tracing_decorator(fn)
+            peg = ReactionPeg(
+                fn=traced_fn, emojis=emojis, conditions=conditions
+            )
             self.reaction_pegs.append(peg)
             return fn
 
@@ -182,7 +247,13 @@ class Router:
                 pattern,
                 fn.__name__,
             )
-            peg = MessagePeg(fn=fn, pattern=pattern, conditions=conditions)
+            tracing_decorator = self._create_tracing_decorator(
+                peg_type="message", peg_identifier=str(pattern)
+            )
+            traced_fn = tracing_decorator(fn)
+            peg = MessagePeg(
+                fn=traced_fn, pattern=pattern, conditions=conditions
+            )
             self.message_pegs.append(peg)
             return fn
 

@@ -1,4 +1,5 @@
 import pytest
+from inspect import signature
 from unittest.mock import Mock, AsyncMock, patch
 
 from .routing import Router, CommandPeg, CallbackPeg, ReactionPeg, MessagePeg
@@ -32,7 +33,8 @@ class TestRouterPegs:
         assert len(router.command_pegs) == 1
         peg = router.command_pegs[0]
         assert isinstance(peg, CommandPeg)
-        assert peg.fn == dummy_command_handler
+        assert peg.fn.__name__ == dummy_command_handler.__name__
+        assert signature(peg.fn) == signature(dummy_command_handler)
         assert peg.name == "test"
         assert peg.args == ["arg1"]
         assert peg.description == description
@@ -49,7 +51,8 @@ class TestRouterPegs:
         assert len(router.callback_pegs) == 1
         peg = router.callback_pegs[0]
         assert isinstance(peg, CallbackPeg)
-        assert peg.fn == dummy_callback_handler
+        assert peg.fn.__name__ == dummy_callback_handler.__name__
+        assert signature(peg.fn) == signature(dummy_callback_handler)
         assert peg.pattern == pattern
         assert peg.conditions is None
 
@@ -65,7 +68,8 @@ class TestRouterPegs:
         assert len(router.reaction_pegs) == 1
         peg = router.reaction_pegs[0]
         assert isinstance(peg, ReactionPeg)
-        assert peg.fn == dummy_reaction_handler
+        assert peg.fn.__name__ == dummy_reaction_handler.__name__
+        assert signature(peg.fn) == signature(dummy_reaction_handler)
         assert peg.emojis == emojis
         assert peg.conditions == conditions
 
@@ -81,7 +85,8 @@ class TestRouterPegs:
         assert len(router.message_pegs) == 1
         peg = router.message_pegs[0]
         assert isinstance(peg, MessagePeg)
-        assert peg.fn == dummy_message_handler
+        assert peg.fn.__name__ == dummy_message_handler.__name__
+        assert signature(peg.fn) == signature(dummy_message_handler)
         assert peg.pattern == pattern
         assert peg.conditions == conditions
 
