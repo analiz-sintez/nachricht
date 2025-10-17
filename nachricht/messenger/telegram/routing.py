@@ -25,6 +25,8 @@ from telegram.ext import (
     filters,
 )
 
+from nachricht.messenger.context import Context
+
 from ...bus import (
     Bus,
     Signal,
@@ -389,6 +391,57 @@ def _create_callback_query_handler(
     return PTBCallbackQueryHandler(wrapped, pattern=peg.pattern)
 
 
+def attach_bus(bus: Bus, router: Router):
+    """
+    Attach the signals from a Bus to the Telegram application.
+    """
+
+    bus.setup()
+
+    logging.info("Bus: registering signal handlers.")
+
+    # def make_handler(signal_type: Type[Signal]) -> PTBCallbackQueryHandler:
+    #     signal_name = signal_type.__name__
+
+    #     async def decode_and_emit(update: Update, context: CallbackContext):
+    #         data = update.callback_query.data
+    #         logger.debug(f"Got callback: {data}, decoding as {signal_name}.")
+    #         signal = decode(signal_type, data)
+    #         if not signal:
+    #             logger.warning(f"Decoding {signal_name} failed.")
+    #             return
+    #         await bus.emit_and_wait(signal, ctx=ctx)
+
+    #     pattern = make_regexp(signal_type)
+    #     logger.debug(f"Registering handler: {pattern} -> {signal_name}")
+    #     handler = PTBCallbackQueryHandler(decode_and_emit, pattern=pattern)
+    # return handler
+
+    def add_peg(signal_type: Type[Signal]) -> None:
+        module_name = getmodule(signal_type).__name__
+        signal_name = signal_type.__name__
+        logging.debug(
+            f"Bus: registering a handler for {module_name}.{signal_name}."
+        )
+
+        pattern = make_regexp(signal_type)
+
+        @router.callback_query(pattern)
+        async def decode_emit_and_wait(ctx: Context, **callback_data):
+            data = ctx._update.callback_query.data
+            logger.debug(f"Got callback: {data}, decoding as {signal_name}.")
+            signal = decode(signal_type, data)
+            if not signal:
+                logger.warning(f"Decoding {signal_name} failed.")
+                return
+            await bus.emit_and_wait(signal, ctx=ctx)
+
+    for signal_type in bus.signals():
+        add_peg(signal_type)
+
+    logging.info("Bus: all signals pegged to the messenger via router.")
+
+
 def attach_router(router: Router, application: Application):
     """
     Attach the stored handlers from a generic Router to the Telegram application.
@@ -448,41 +501,3 @@ def attach_router(router: Router, application: Application):
         logger.debug(
             f"Callback query handler added for pattern: {peg.pattern}"
         )
-
-
-def attach_bus(bus: Bus, application: Application):
-    """
-    Attach the signals from a Bus to the Telegram application.
-    """
-
-    def make_handler(signal_type: Type[Signal]) -> PTBCallbackQueryHandler:
-        signal_name = signal_type.__name__
-
-        async def decode_and_emit(update: Update, context: CallbackContext):
-            data = update.callback_query.data
-            logger.debug(f"Got callback: {data}, decoding as {signal_name}.")
-            signal = decode(signal_type, data)
-            if not signal:
-                logger.warning(f"Decoding {signal_name} failed.")
-                return
-            ctx = TelegramContext(update, context, config=bus.config)
-            _handle_global_on_reply(ctx)
-            await bus.emit_and_wait(signal, ctx=ctx)
-
-        pattern = make_regexp(signal_type)
-        logger.debug(f"Registering handler: {pattern} -> {signal_name}")
-        handler = PTBCallbackQueryHandler(decode_and_emit, pattern=pattern)
-        return handler
-
-    bus.setup()
-
-    logging.info("Bus: registering signal handlers.")
-    for signal_type in bus.signals():
-        module_name = getmodule(signal_type).__name__
-        signal_name = signal_type.__name__
-        logging.debug(
-            f"Bus: registering a handler for {module_name}.{signal_name}."
-        )
-        application.add_handler(make_handler(signal_type))
-
-    logging.info("Bus: all signals registered.")

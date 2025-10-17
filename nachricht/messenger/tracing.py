@@ -8,7 +8,6 @@ from sqlalchemy.types import Integer, JSON
 from sqlalchemy.ext.mutable import MutableDict
 
 from ..db import db, Model, dttm_utc
-from ..bus import trace_id_var
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +47,7 @@ class DatabasePegTracer(AbstractPegTracer):
         peg_identifier: str,
         handler: Callable,
         context_info: Dict,
-    ) -> None:
+    ) -> Any:
         trigger = PegTrigger(
             ts=datetime.now(timezone.utc),
             peg_type=peg_type,
@@ -59,9 +58,8 @@ class DatabasePegTracer(AbstractPegTracer):
         try:
             db.session.add(trigger)
             db.session.flush()
-            trace_id_var.set(trigger.id)
             db.session.commit()
+            return trigger.id
         except Exception:
             db.session.rollback()
-            trace_id_var.set(None)
             logger.error("Failed to log peg trigger.", exc_info=True)

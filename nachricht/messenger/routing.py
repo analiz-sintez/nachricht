@@ -1,6 +1,7 @@
 import re
 import logging
 import hashlib
+import asyncio
 from dataclasses import dataclass
 from functools import wraps
 from inspect import signature, Signature, Parameter
@@ -20,8 +21,8 @@ from typing import (
 from .context import Context, Message, Emoji
 from .tracing import AbstractPegTracer, NoOpPegTracer
 from ..auth import get_user, User
-from ..i18n import TranslatableString, resolve
-from ..bus import check_conditions, Conditions
+from ..i18n import TranslatableString
+from ..bus import check_conditions, Conditions, trace_id_var
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -108,7 +109,7 @@ class Router:
                 return fn  # If no tracer is configured, return the original function
 
             @wraps(fn)
-            async def wrapper(*args, **kwargs):
+            async def trace_and_run(*args, **kwargs):
                 peg_trigger = {
                     "peg_type": peg_type,
                     "peg_identifier": peg_identifier,
@@ -133,12 +134,21 @@ class Router:
                         "user_id": ctx.account.id if ctx.account else None,
                     }
 
-                self._peg_tracer.trace_peg_trigger(**peg_trigger)
+                async def _set_var_and_run():
+                    # Inside this function, the trace id contxt var is set.
+                    # So this and the following function should run inside a
+                    # context.
+                    trace_id = self._peg_tracer.trace_peg_trigger(
+                        **peg_trigger
+                    )
+                    trace_id_var.set(trace_id)
 
-                # Execute the original handler function
-                return await fn(*args, **kwargs)
+                    # Execute the original handler function
+                    return await fn(*args, **kwargs)
 
-            return wrapper
+                return await asyncio.create_task(_set_var_and_run())
+
+            return trace_and_run
 
         return decorator
 
