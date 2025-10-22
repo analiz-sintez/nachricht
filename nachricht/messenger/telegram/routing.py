@@ -85,7 +85,7 @@ def _wrap_function(fn: Callable, router: Router) -> Callable:
     type_hints = get_type_hints(fn)
 
     @wraps(fn)
-    async def wrapped(update: Update, context: TelegramContext, **kwargs):
+    async def wrapped(update: Update, context: CallbackContext, **kwargs):
         if context.matches:
             match = context.matches[0]
             if isinstance(match, re.Match):
@@ -98,7 +98,9 @@ def _wrap_function(fn: Callable, router: Router) -> Callable:
                 kwargs[key] = _coerce(value, type_hints[key])
 
         logger.info(f"Calling {fn.__name__} with args: {kwargs}")
-        ctx = TelegramContext(update, context, config=router.config)
+        ctx = TelegramContext(
+            router.app.bot, update, context, config=router.config
+        )
         return await fn(ctx=ctx, **kwargs)
 
     return wrapped
@@ -117,7 +119,7 @@ def _wrap_command(
 
     @wraps(fn)
     async def wrapped(
-        update: Update, context: TelegramContext, **outer_kwargs
+        update: Update, context: CallbackContext, **outer_kwargs
     ):
         if len(arg_names) == 1:
             args = [update.message.text.split(" ", 1)[1]]
@@ -136,7 +138,9 @@ def _wrap_command(
         }
 
         logger.debug(f"Calling {fn.__name__} with args: {outer_kwargs}")
-        ctx = TelegramContext(update, context, config=router.config)
+        ctx = TelegramContext(
+            router.app.bot, update, context, config=router.config
+        )
         return await fn(ctx, **kwargs)
 
     return wrapped
@@ -185,8 +189,10 @@ def _create_command_handler(
         else:
             conditionless_pegs.append(peg)
 
-    async def dispatch(update: Update, context: TelegramContext):
-        ctx = TelegramContext(update, context, config=router.config)
+    async def dispatch(update: Update, context: CallbackContext):
+        ctx = TelegramContext(
+            router.app.bot, update, context, config=router.config
+        )
         # Any user action cleans the global on_reply stash,
         # no matter consumed the signal in it or not.
         signal = _handle_global_on_reply(ctx)
@@ -250,8 +256,10 @@ def _create_reaction_handler(
                 emoji_map[emoji] = []
             emoji_map[emoji].append(peg)
 
-    async def dispatch(update: Update, context: TelegramContext):
-        ctx = TelegramContext(update, context, config=router.config)
+    async def dispatch(update: Update, context: CallbackContext):
+        ctx = TelegramContext(
+            router.app.bot, update, context, config=router.config
+        )
         # Any user action cleans the global on_reply stash,
         # no matter consumed the signal in it or not.
         signal = _handle_global_on_reply(ctx)
@@ -325,8 +333,10 @@ def _create_message_handler(
         if not (callable(peg.pattern) or isinstance(peg.pattern, re.Pattern)):
             raise ValueError("Pattern must be a regexp or a callable.")
 
-    async def dispatch(update: Update, context: TelegramContext):
-        ctx = TelegramContext(update, context, config=router.config)
+    async def dispatch(update: Update, context: CallbackContext):
+        ctx = TelegramContext(
+            router.app.bot, update, context, config=router.config
+        )
         message = ctx.message
         logging.info("Dispatching message: id=%s", message.id)
         # Here we can do the trick: get the one-time reply-to message id
@@ -380,9 +390,11 @@ def _create_callback_query_handler(
 
     @wraps(fn)
     async def wrapped(
-        update: Update, context: TelegramContext, *args, **kwargs
+        update: Update, context: CallbackContext, *args, **kwargs
     ):
-        ctx = TelegramContext(update, context, config=router.config)
+        ctx = TelegramContext(
+            router.app.bot, update, context, config=router.config
+        )
         # Any user action cleans the global on_reply stash,
         # no matter consumed the signal in it or not.
         _handle_global_on_reply(ctx)
@@ -447,6 +459,7 @@ def attach_router(router: Router, application: Application):
     Attach the stored handlers from a generic Router to the Telegram application.
     """
     logger.info("Attaching handlers to the application.")
+    router.app = application
 
     # Process and add handlers
 

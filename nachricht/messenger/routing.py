@@ -91,6 +91,7 @@ class Router:
         self,
         config: Optional[object] = None,
         peg_tracer: Optional[AbstractPegTracer] = None,
+        app: Optional[Any] = None,
     ):
         self.config = config
         self._peg_tracer = peg_tracer or NoOpPegTracer()
@@ -98,6 +99,16 @@ class Router:
         self.callback_pegs: list[CallbackPeg] = []
         self.reaction_pegs: list[ReactionPeg] = []
         self.message_pegs: list[MessagePeg] = []
+        self._app = app
+
+    @property
+    def app(self):
+        """A non-necessary object for the application we attach to."""
+        return self._app
+
+    @app.setter
+    def app(self, value):
+        self._app = value
 
     def _create_tracing_decorator(
         self, peg_type: str, peg_identifier: str

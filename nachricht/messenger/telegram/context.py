@@ -8,6 +8,7 @@ from telegram.ext import CallbackContext
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram import (
+    Bot,
     Update,
     InputMediaPhoto,
     Message as PTBMessage,
@@ -55,13 +56,19 @@ class TelegramContext(Context):
 
     def __init__(
         self,
+        bot: Bot,
         update: Update,
         context: CallbackContext,
         config: Optional[object] = None,
     ):
+        self._bot = bot
         self._update = update
         self._context = context
         return super().__init__(config)
+
+    @property
+    def bot(self):
+        return self._bot
 
     @property
     def account(self) -> Account:
@@ -298,14 +305,21 @@ class TelegramContext(Context):
             )
             image = None  # Force no image if disabled
 
-        can_edit = update.callback_query is not None and not new
+        can_edit = False
+        if (not new) and (
+            (update.callback_query is not None)
+            or (update.message_reaction is not None)
+        ):
+            can_edit = True
+            message_id = self.bot_message.id
+            chat_id = self.bot_message.chat_id
 
         if can_edit:
-            # Editing an existing message
-            message = update.callback_query.message
             if image:
                 try:
-                    message = await message.edit_media(
+                    message = await self.bot.edit_message_media(
+                        chat_id=chat_id,
+                        message_id=message_id,
                         media=InputMediaPhoto(
                             media=open(image, "rb"),
                             caption=text,
@@ -320,7 +334,9 @@ class TelegramContext(Context):
                     logger.warning(
                         f"Failed to edit media (possibly same image): {e}. Trying to edit caption."
                     )
-                    message = await message.edit_caption(
+                    message = await self.bot.edit_message_caption(
+                        chat_id=chat_id,
+                        message_id=message_id,
                         caption=text,
                         parse_mode=parse_mode,
                         reply_markup=markup,
@@ -335,15 +351,19 @@ class TelegramContext(Context):
                 # This might require deleting the old message and sending a new one if media type changes from photo to text.
                 # For now, let's assume we can edit the text or caption.
                 try:
-                    message = await message.edit_text(  # Handles case where previous message was text
+                    # Handles case where previous message was text
+                    message = await self.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
                         text=text,
                         reply_markup=markup,
                         parse_mode=parse_mode,
                     )
-                except (
-                    Exception
-                ):  # Fallback to edit_caption if edit_text fails (e.g. previous was photo)
-                    message = await message.edit_caption(
+                except Exception:
+                    # Fallback to edit_caption if edit_text fails (e.g. previous was photo)
+                    message = await self.bot.edit_message_caption(
+                        chat_id=chat_id,
+                        message_id=message_id,
                         caption=text,
                         reply_markup=markup,
                         parse_mode=parse_mode,
@@ -357,7 +377,7 @@ class TelegramContext(Context):
                 effective_reply_to_message_id = update.message.message_id
 
             if image:
-                message = await context.bot.send_photo(
+                message = await self.bot.send_photo(
                     chat_id=update.effective_chat.id,
                     photo=open(image, "rb"),
                     caption=text,
@@ -366,7 +386,7 @@ class TelegramContext(Context):
                     reply_to_message_id=effective_reply_to_message_id,
                 )
             else:
-                message = await context.bot.send_message(
+                message = await self.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=text,
                     reply_markup=markup,
