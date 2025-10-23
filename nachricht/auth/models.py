@@ -3,7 +3,8 @@ import logging
 from sqlalchemy import Integer, String
 from sqlalchemy.orm import mapped_column
 
-from ..db import Model, OptionsMixin
+from ..db import Model
+from ..options import OptionsMixin
 
 
 logger = logging.getLogger(__name__)

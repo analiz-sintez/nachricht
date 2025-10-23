@@ -10,7 +10,10 @@ venv:
 	@if [ ! -d "$(VENV_PATH)" ]; then \
 		$(PYTHON_BIN) -m venv $(VENV_PATH); \
 	fi
-	. $(VENV_PATH)/bin/activate && pip install --upgrade pip && pip install -r requirements.txt
+	. $(VENV_PATH)/bin/activate \
+		&& pip install --upgrade pip \
+		&& pip install -r requirements.txt \
+		&& pip install -e .
 
 poetry:
 	cat ./requirements.txt | grep -v "@" | xargs poetry add
