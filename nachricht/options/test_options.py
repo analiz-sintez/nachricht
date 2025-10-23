@@ -150,7 +150,9 @@ class TestOptionAccessor:
         with pytest.raises(ValueError):
             accessor[IntOption] = -5  # Fails the value > 0 check
 
-    def test_setitem_emits_signal(self, accessor, mock_user, mock_bus):
+    def test_setitem_emits_signal(
+        self, accessor, mock_user, mock_bus, option_registry
+    ):
         """Test that setting a value emits an OptionChanged signal."""
         accessor[IntOption] = 20
 
@@ -158,8 +160,10 @@ class TestOptionAccessor:
         signal_instance = mock_bus.emit.call_args[0][0]
 
         assert isinstance(signal_instance, OptionChanged)
-        assert signal_instance.obj is mock_user
-        assert signal_instance.option is IntOption
+        assert signal_instance.obj_id is mock_user.id
+        assert signal_instance.option_path is option_registry.get_path(
+            IntOption
+        )
         assert signal_instance.old_value == 10  # The default value
         assert signal_instance.new_value == 20
 

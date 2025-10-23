@@ -81,8 +81,9 @@ class OptionAccessor:
         # Emit signal
         if self.registry.bus:
             signal = OptionChanged(
-                obj=self.instance,
-                option=option_cls,
+                model_name=self.instance.__class__.__name__,
+                obj_id=self.instance.id,
+                option_path=path,
                 old_value=old_value,
                 new_value=value,
             )

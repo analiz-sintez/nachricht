@@ -1,8 +1,5 @@
 from typing import Optional
-from .signal import (
-    Signal,
-    TerminalSignal,
-)
+from .signal import Signal, TerminalSignal, InternalSignal
 from .service import (
     Bus,
     encode,

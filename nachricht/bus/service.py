@@ -22,7 +22,7 @@ from typing import (
 )
 from inspect import signature
 
-from .signal import Signal, TerminalSignal
+from .signal import Signal, TerminalSignal, InternalSignal
 from .backends import AbstractSavingBackend, NoOpBackend
 
 

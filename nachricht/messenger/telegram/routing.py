@@ -31,6 +31,7 @@ from ...bus import (
     Bus,
     Signal,
     TerminalSignal,
+    InternalSignal,
     unoption,
     decode,
     make_regexp,
@@ -412,23 +413,6 @@ def attach_bus(bus: Bus, router: Router):
 
     logging.info("Bus: registering signal handlers.")
 
-    # def make_handler(signal_type: Type[Signal]) -> PTBCallbackQueryHandler:
-    #     signal_name = signal_type.__name__
-
-    #     async def decode_and_emit(update: Update, context: CallbackContext):
-    #         data = update.callback_query.data
-    #         logger.debug(f"Got callback: {data}, decoding as {signal_name}.")
-    #         signal = decode(signal_type, data)
-    #         if not signal:
-    #             logger.warning(f"Decoding {signal_name} failed.")
-    #             return
-    #         await bus.emit_and_wait(signal, ctx=ctx)
-
-    #     pattern = make_regexp(signal_type)
-    #     logger.debug(f"Registering handler: {pattern} -> {signal_name}")
-    #     handler = PTBCallbackQueryHandler(decode_and_emit, pattern=pattern)
-    # return handler
-
     def add_peg(signal_type: Type[Signal]) -> None:
         module_name = getmodule(signal_type).__name__
         signal_name = signal_type.__name__
@@ -449,6 +433,8 @@ def attach_bus(bus: Bus, router: Router):
             await bus.emit_and_wait(signal, ctx=ctx)
 
     for signal_type in bus.signals():
+        if issubclass(signal_type, InternalSignal):
+            continue
         add_peg(signal_type)
 
     logging.info("Bus: all signals pegged to the messenger via router.")
