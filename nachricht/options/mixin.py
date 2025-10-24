@@ -7,7 +7,7 @@ from sqlalchemy.types import JSON
 from sqlalchemy.ext.mutable import MutableDict
 
 from ..db import db, JsonValue
-from .service import Option, get_options_registry
+from .service import Option, get_option_registry
 from .signal import OptionChanged
 
 T = TypeVar("T")
@@ -22,7 +22,7 @@ class OptionAccessor:
 
     def __init__(self, instance=None, registry=None):
         self.instance = instance
-        self.registry = registry or get_options_registry()
+        self.registry = registry or get_option_registry()
 
     def __get__(self, instance, owner):
         if instance is None:
@@ -42,6 +42,9 @@ class OptionAccessor:
                 f"Option {option_cls.__name__} is not applicable to object "
                 f"of type {type(self.instance).__name__}"
             )
+
+        if self.instance.options is None:
+            return option_cls.value
 
         path = self.registry.get_path(option_cls)
         return self.instance.options.get(path, option_cls.value)
@@ -81,7 +84,7 @@ class OptionAccessor:
         # Emit signal
         if self.registry.bus:
             signal = OptionChanged(
-                model_name=self.instance.__class__.__name__,
+                obj_type=self.instance.__class__.__name__,
                 obj_id=self.instance.id,
                 option_path=path,
                 old_value=old_value,

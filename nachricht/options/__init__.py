@@ -7,8 +7,8 @@ from .service import (
     Option,
     OptionGroup,
     option_registry,
-    create_options_registry,
-    get_options_registry,
+    create_option_registry,
+    get_option_registry,
 )
 from .mixin import OptionsMixin, OptionAccessor
 from .signal import OptionChanged

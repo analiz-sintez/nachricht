@@ -122,7 +122,7 @@ def discover_options(registry: OptionRegistry):
 option_registry: Optional[OptionRegistry] = None
 
 
-def create_options_registry(bus: Bus) -> OptionRegistry:
+def create_option_registry(bus: Bus) -> OptionRegistry:
     """
     Initializes the global option registry, discovers all Option subclasses,
     and returns the registry instance.
@@ -133,6 +133,6 @@ def create_options_registry(bus: Bus) -> OptionRegistry:
     return option_registry
 
 
-def get_options_registry() -> Optional[OptionRegistry]:
+def get_option_registry() -> Optional[OptionRegistry]:
     """Returns the global option registry instance."""
     return option_registry
