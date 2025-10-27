@@ -140,13 +140,13 @@ async def _render_options_view(ctx: Context, obj: OptionsMixin, path: str):
                             opt_cls.group.name, ctx.locale
                         )
                         break
-        text = f"*{group_name}*"
+        text = f"📁*{group_name}*"
 
         subgroups, child_options = registry.get_children(path)
 
         subgroup_buttons = [
             Button(
-                text=await resolve(cls.name, ctx.locale),
+                text="📁" + await resolve(cls.name, ctx.locale),
                 callback=ShowOptionGroup(
                     obj_type=obj.__class__.__name__, obj_id=obj.id, path=p
                 ),
@@ -155,18 +155,21 @@ async def _render_options_view(ctx: Context, obj: OptionsMixin, path: str):
         ]
         buttons.extend([b] for b in subgroup_buttons)
 
-        option_buttons = [
-            Button(
-                text=await resolve(opt.name, ctx.locale),
+        for opt in sorted(child_options, key=lambda o: o.name.msgid):
+            opt_name = await resolve(opt.name, ctx.locale)
+            if type(opt.value) is bool:
+                opt_value = "✅ ON" if obj.option[opt] else "🚫 OFF"
+            else:
+                opt_value = str(obj.option[opt])
+            button = Button(
+                text=f"{opt_name}: {opt_value}",
                 callback=ShowOption(
                     obj_type=obj.__class__.__name__,
                     obj_id=obj.id,
                     path=registry.get_path(opt),
                 ),
             )
-            for opt in sorted(child_options, key=lambda o: o.name.msgid)
-        ]
-        buttons.extend([b] for b in option_buttons)
+            buttons.append([button])
 
     else:  # It's an option path
         option_name = await resolve(option_cls.name, ctx.locale)
@@ -186,7 +189,7 @@ async def _render_options_view(ctx: Context, obj: OptionsMixin, path: str):
             buttons.append(
                 [
                     Button(
-                        text="✅ On" if not current_value else "▶️ On",
+                        text="✅ On" if not current_value else "· ✅ On ·",
                         callback=SetOptionBool(
                             obj_type=obj.__class__.__name__,
                             obj_id=obj.id,
@@ -195,7 +198,7 @@ async def _render_options_view(ctx: Context, obj: OptionsMixin, path: str):
                         ),
                     ),
                     Button(
-                        text="🚫 Off" if current_value else "▶️ Off",
+                        text="🚫 Off" if current_value else "· 🚫 Off ·",
                         callback=SetOptionBool(
                             obj_type=obj.__class__.__name__,
                             obj_id=obj.id,
@@ -209,7 +212,7 @@ async def _render_options_view(ctx: Context, obj: OptionsMixin, path: str):
             enum_buttons = [
                 Button(
                     text=(
-                        f"▶️ {member.name}"
+                        f"· {member.name} ·"
                         if member == current_value
                         else member.name
                     ),
