@@ -470,6 +470,9 @@ def make_regexp(signal_type: Type[Signal]) -> str:
 
     parts = []
     for field in signal_fields:
+        logger.debug(
+            "... processing field %s of type %s", field.name, field.type
+        )
         field_name = field.name
         base_type = unoption(field.type)
 
@@ -483,7 +486,7 @@ def make_regexp(signal_type: Type[Signal]) -> str:
         elif base_type is float:
             pattern_part = f"(-?\\d+\\.\\d*)"
         elif base_type is str:
-            pattern_part = f'([^:]+|".+")'
+            pattern_part = f'([^:]*|".+")'
         else:
             raise TypeError(f"Unsupported attribute type: {base_type}")
 
