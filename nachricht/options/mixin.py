@@ -1,5 +1,5 @@
 import logging
-from typing import Type, TypeVar, get_type_hints
+from typing import Type, TypeVar, Optional, get_type_hints
 
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.orm.attributes import flag_modified
@@ -49,35 +49,43 @@ class OptionAccessor:
         path = self.registry.get_path(option_cls)
         return self.instance.options.get(path, option_cls.value)
 
-    def __setitem__(self, option_cls: Type[Option], value: T):
+    def __setitem__(self, option_cls: Type[Option], value: Optional[T]):
         """
         Sets the value for an option after validation.
         """
         if not self.registry or not self.registry.get_path(option_cls):
             raise KeyError(f"Option {option_cls.__name__} is not registered.")
 
-        # Type validation
-        type_hints = get_type_hints(option_cls)
-        expected_type = type_hints.get("value")
-        if expected_type and not isinstance(value, expected_type):
-            raise TypeError(
-                f"Invalid type for {option_cls.__name__}. "
-                f"Expected {expected_type}, got {type(value)}"
-            )
+        if value is not None:
+            # Type validation
+            type_hints = get_type_hints(option_cls)
+            expected_type = type_hints.get("value")
+            if expected_type and not isinstance(value, expected_type):
+                raise TypeError(
+                    f"Invalid type for {option_cls.__name__}. "
+                    f"Expected {expected_type}, got {type(value)}"
+                )
 
-        # Custom validation
-        if not option_cls._check(value):
-            raise ValueError(
-                f"Value '{value}' failed custom validation for "
-                f"option {option_cls.__name__}"
-            )
-
-        path = self.registry.get_path(option_cls)
-        old_value = self[option_cls]
+            # Custom validation
+            if not option_cls._check(value):
+                raise ValueError(
+                    f"Value '{value}' failed custom validation for "
+                    f"option {option_cls.__name__}"
+                )
 
         if self.instance.options is None:
             self.instance.options = {}
-        self.instance.options[path] = value
+
+        path = self.registry.get_path(option_cls)
+        old_value = self[option_cls]
+        raw_value = self.instance.options.get(path, None)
+
+        if value is None:
+            if raw_value is not None:
+                del self.instance.options[path]
+        else:
+            self.instance.options[path] = value
+
         flag_modified(self.instance, "options")
         logger.debug(f"Set option '{path}' for {self.instance} to '{value}'")
 

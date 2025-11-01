@@ -480,11 +480,11 @@ def make_regexp(signal_type: Type[Signal]) -> str:
             enum_keys = "|".join([re.escape(e.name) for e in base_type])
             pattern_part = f"({enum_keys})"
         elif base_type is bool:
-            pattern_part = "(true|false)"
+            pattern_part = "(true|false|)"
         elif base_type is int:
-            pattern_part = f"(-?\\d+)"
+            pattern_part = f"((-?\\d+)|)"
         elif base_type is float:
-            pattern_part = f"(-?\\d+\\.\\d*)"
+            pattern_part = f"((-?\\d+\\.\\d*)|)"
         elif base_type is str:
             pattern_part = f'([^:]*|".+")'
         else:

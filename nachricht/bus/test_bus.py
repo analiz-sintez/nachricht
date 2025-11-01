@@ -114,7 +114,7 @@ def test_make_regexp(bus):
 
     # expected_regexp = r"^TestSignal:(?P<param>\d+):(?P<param2>\S+)$"
     expected_regexp = (
-        r'^TestSignal:(?P<param>(-?\d+)):(?P<param2>([^:]+|".+"))$'
+        r'^TestSignal:(?P<param>((-?\d+)|)):(?P<param2>([^:]*|".+"))$'
     )
     assert make_regexp(TestSignal) == expected_regexp
 

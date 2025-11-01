@@ -42,7 +42,7 @@ class SetOptionBool(Signal):
     obj_type: str
     obj_id: int
     path: str
-    value: bool
+    value: Optional[bool]
 
 
 @dataclass
@@ -52,7 +52,7 @@ class SetOptionEnum(Signal):
     obj_type: str
     obj_id: int
     path: str
-    value: str  # The string name of the enum member
+    value: Optional[str]  # The string name of the enum member
 
 
 @dataclass
@@ -204,6 +204,15 @@ async def _render_options_view(ctx: Context, obj: OptionsMixin, path: str):
                             obj_id=obj.id,
                             path=path,
                             value=False,
+                        ),
+                    ),
+                    Button(
+                        text="Reset to default",
+                        callback=SetOptionBool(
+                            obj_type=obj.__class__.__name__,
+                            obj_id=obj.id,
+                            path=path,
+                            value=None,
                         ),
                     ),
                 ]
