@@ -80,9 +80,14 @@ class TelegramContext(Context):
             except Exception as e:
                 logger.error("Wrong locale: account %s, error %s", tg_user, e)
                 locale = Locale("en")
+            # Surprisingly, sometimes tg users don't have logins.
+            # But they must have at least ids.
+            login = tg_user.username or (
+                str(tg_user.id) if tg_user.id else None
+            )
             self._account = Account(
                 id=tg_user.id,
-                login=tg_user.username,
+                login=login,
                 locale=locale,
                 _=tg_user,
             )
