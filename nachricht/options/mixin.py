@@ -7,7 +7,7 @@ from sqlalchemy.types import JSON
 from sqlalchemy.ext.mutable import MutableDict
 
 from ..db import db, JsonValue
-from .service import Option, get_option_registry
+from .registry import Option, get_option_registry
 from .signal import OptionChanged
 
 T = TypeVar("T")

@@ -328,13 +328,13 @@ class Bus:
 
         tasks = []
         plugs = self._plugs.get(signal_type, [])
-        if not plugs:
-            return tasks
-
         trace_id = trace_id_var.get()
         emitted_signal_id = self._saving_backend.log_signal_emitted(
             signal, [p.slot for p in plugs], trace_id=trace_id
         )
+
+        if not plugs:
+            return tasks
 
         for plug in plugs:
             # No conditions means conditions are passed.

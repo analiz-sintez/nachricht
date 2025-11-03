@@ -1,7 +1,7 @@
 from typing import Optional
 
 from ..bus import Bus
-from .service import (
+from .registry import (
     OptionRegistry,
     discover_options,
     Option,
