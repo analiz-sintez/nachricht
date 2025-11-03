@@ -9,6 +9,7 @@ import pytest
 from nachricht import create_app, db as _db
 from nachricht.bus.backends import (
     Signal,
+    AbstractSavingBackend,
     NoOpBackend,
     LogFileBackend,
     DatabaseBackend,
@@ -133,3 +134,11 @@ class TestBusAndBackendIntegration:
         assert slot_entry.status == "error"
         assert slot_entry.duration_ms >= 0
         assert "ValueError: It failed" in slot_entry.error_message
+
+    async def test_signal_with_no_slots_is_logged(self):
+        backend = MagicMock(spec=DatabaseBackend)
+        bus = Bus(saving_backend=backend)
+
+        # emit_and_wait re-raises the exception
+        await bus.emit_and_wait(IntegrationTestSignal(data="no slots"))
+        backend.log_signal_emitted.assert_called_once()

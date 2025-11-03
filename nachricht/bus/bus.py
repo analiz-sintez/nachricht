@@ -455,9 +455,9 @@ def make_regexp(signal_type: Type[Signal]) -> str:
 
     E.g.:
     "CardAnswerShown:1"
-    becomes "^CardAnswerShown:(?P<card_id>\d+)$"
+    becomes "^CardAnswerShown:(?P<card_id>\\d+)$"
     "CardAnswerGraded:1:good"
-    becomes "^CardAnswerGraded:(?P<card_id>\d+):(?P<answer>again|hard|good|easy)$"
+    becomes "^CardAnswerGraded:(?P<card_id>\\d+):(?P<answer>again|hard|good|easy)$"
 
     Attribute types are taken from signal class definition.
     Supported are: all scalars, enums.
