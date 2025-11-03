@@ -1,12 +1,8 @@
 import logging
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Dict, Union
+from typing import Optional, Dict, Union, List
 from dataclasses import dataclass
-from typing import (
-    List,
-    Optional,
-)
 from babel import Locale
 
 from nachricht.auth import User
@@ -14,60 +10,14 @@ from nachricht.auth import User
 from ..bus import Signal
 from ..i18n import TranslatableString
 
+from .models import Account, Chat, Message, Conversation
+from .backends import (
+    ContextAwareObject,
+    AbstractContextStore,
+    MemoryContextStore,
+)
+
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class Account:
-    """Messenger account. Not to be confused with a bot User."""
-
-    id: int
-    login: str
-    locale: Locale
-    _: Optional[object] = None  # raw object
-
-
-@dataclass
-class Chat:
-    id: int
-    _: Optional[object]
-
-
-@dataclass
-class Message:
-    id: int
-    chat_id: int
-    user_id: Optional[int] = None
-    text: Optional[str] = None
-    parent: Optional[object] = None  # another Message object
-    # context: Dict
-    # messenger: str
-    # conversation: Conversation
-    _: Optional[object] = None  # raw object
-
-
-@dataclass
-class Conversation:
-    """
-    Messages are grouped into conversations.
-    Messages within a single conversation most probably share the same
-    context.
-
-    If a message leads to an emittance of a signal, this signal may be
-    processed differently whether it belongs to a conversation or not.
-
-    E.g. when a user selects the studying language, the signal is emitted.
-    If the user is in the middle of the onboarding, this signal should lead
-    to the next step of it, otherwise the signal should be ignored.
-
-    For now, a new conversation is started:
-    - if it is directly said by a send_message parameter
-    - if no parent message with a conversation is found
-
-    The message is not necessarily ascribed to a conversation.
-    """
-
-    id: int
 
 
 @dataclass
@@ -149,8 +99,15 @@ class Context:
     maybe even IRC.
     """
 
-    def __init__(self, config: Optional[object] = None):
+    def __init__(
+        self,
+        config: Optional[object] = None,
+        store: Optional[AbstractContextStore] = None,
+    ):
         self.config = config
+        if not store:
+            store = MemoryContextStore()
+        self._store = store
 
     def username(self) -> str:
         raise NotImplementedError()
@@ -171,6 +128,11 @@ class Context:
         raise NotImplementedError()
 
     @property
+    def chat(self) -> Chat:
+        """The chat where messages are sent."""
+        raise NotImplementedError()
+
+    @property
     def message(self) -> Optional[Message]:
         """The message the **user** sent."""
         raise NotImplementedError()
@@ -182,26 +144,47 @@ class Context:
 
     @property
     def conversation(self) -> Optional[Conversation]:
-        raise NotImplementedError()
+        if hasattr(self, "_conversation"):
+            return self._conversation
+
+        conv = None
+        # If the message is ascribed to a conversation, return it.
+        if self.message and (
+            id := self.context(self.message).get("_conversation")
+        ):
+            conv = Conversation(
+                id=id, chat_id=self.chat.id, account_id=self.account.id
+            )
+        # Otherwise, check its parent message.
+        elif self.bot_message and (
+            id := self.context(self.bot_message).get("_conversation")
+        ):
+            conv = Conversation(
+                id=id, chat_id=self.chat.id, account_id=self.account.id
+            )
+
+        self._conversation = conv
+        return self._conversation
 
     @conversation.setter
     def conversation(self, value: Conversation):
-        raise NotImplementedError()
+        if not isinstance(value, Conversation):
+            raise TypeError()
+        self._conversation = value
 
     def start_conversation(self, **context):
         """Start a new conversation."""
         id = int(1000 * datetime.now().timestamp())
-        conv = Conversation(id)
+        conv = Conversation(
+            id=id, chat_id=self.chat.id, account_id=self.account.id
+        )
         self.conversation = conv
         for key, value in context.items():
             self.context(conv)[key] = value
 
-    def context(
-        self, obj: Union[Message, Chat, Account, Conversation]
-    ) -> Dict:
+    def context(self, obj: ContextAwareObject) -> Dict:
         """Return a context dict for a given object."""
-        # TODO bad naming?
-        raise NotImplementedError()
+        return self._store[obj]
 
     async def send_message(
         self,

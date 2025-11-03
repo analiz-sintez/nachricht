@@ -78,23 +78,6 @@ class YourMessengerContext(Context):
         # ... your code here ...
         pass
 
-    @property
-    def conversation(self) -> Optional[Conversation]:
-        # ... your code here ...
-        pass
-
-    @conversation.setter
-    def conversation(self, value: Conversation):
-        # ... your code here ...
-        pass
-
-    def context(
-        self, obj: Union[Message, Chat, Account, Conversation]
-    ) -> Dict:
-        """Return a context dict for a given object."""
-        # ... your code here ...
-        pass
-
     async def send_message(
         self,
         text: Union[str, TranslatableString],

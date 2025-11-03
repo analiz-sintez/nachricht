@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from typing import Optional, List, Dict, Union
+from typing import Optional, List, Dict, Union, Any
 import logging
 
 from babel import Locale
@@ -19,6 +19,7 @@ from telegram import (
 
 from ...auth import User, get_user
 from ...bus import Signal, encode
+from ...i18n import TranslatableString, resolve
 from .. import (
     Context,
     Button,
@@ -28,8 +29,8 @@ from .. import (
     Chat,
     Emoji,
     Conversation,
+    AbstractContextStore,
 )
-from ...i18n import TranslatableString, resolve
 
 
 logger = logging.getLogger(__name__)
@@ -60,11 +61,12 @@ class TelegramContext(Context):
         update: Update,
         context: CallbackContext,
         config: Optional[object] = None,
+        store: Optional[AbstractContextStore] = None,
     ):
         self._bot = bot
         self._update = update
         self._context = context
-        return super().__init__(config)
+        return super().__init__(config, store)
 
     @property
     def bot(self):
@@ -216,75 +218,6 @@ class TelegramContext(Context):
                 )
         self._bot_message = message
         return self._bot_message
-
-    @property
-    def conversation(self) -> Optional[Conversation]:
-        if hasattr(self, "_conversation"):
-            return self._conversation
-
-        conv = None
-        # If the message is ascribed to a conversation, return it.
-        if self.message and (
-            id := self.context(self.message).get("_conversation")
-        ):
-            conv = Conversation(id)
-        # Otherwise, check its parent message.
-        elif self.bot_message and (
-            id := self.context(self.bot_message).get("_conversation")
-        ):
-            conv = Conversation(id)
-
-        self._conversation = conv
-        return self._conversation
-
-    @conversation.setter
-    def conversation(self, value):
-        self._conversation = value
-
-    def context(
-        self, obj: Optional[Union[Message, Chat, Account, Conversation]]
-    ) -> Dict:
-        """
-        All this is from current user perspective. Multiple users
-        can have different contexts on the same messages, chats and
-        other users.
-
-        Message: message context;
-        Chat: chat context;
-        User: user context, including a context of one user on another one.
-        """
-        if obj is None:
-            return None
-        elif isinstance(obj, Message):
-            # Message context is stored in chats telegram context
-            store = self._context.chat_data
-            key = "_messages"
-        elif isinstance(obj, Conversation):
-            # Conversations reside in chats
-            store = self._context.chat_data
-            key = "_conversations"
-        elif isinstance(obj, Chat):
-            # Message context is stored in users telegram context
-            store = self._context.user_data
-            key = "_chats"
-        elif isinstance(obj, Account):
-            # Users context is stored in users telegram context
-            store = self._context.user_data
-            key = "_users"
-        else:
-            logger.error(f"Unsupported context type: {type(obj)}.")
-            return None
-
-        # ... create the context storage if missing
-        if key not in store:
-            store[key]: Dict[int, Dict] = {}
-        ctx = store[key]
-
-        # ... create the dict for the given object if missing
-        if obj.id not in ctx:
-            ctx[obj.id]: Dict = {}
-
-        return ctx[obj.id]
 
     async def _send_message(
         self,
