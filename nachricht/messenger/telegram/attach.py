@@ -486,10 +486,16 @@ def attach_router(router: Router, application: Application):
     # Reactions:
     # ... this is a special case. PTB doesn't support dispatching on emoji types,
     #     so we register a single handler which does this dispatch.
-    if router.reaction_pegs:
-        application.add_handler(
-            _create_reaction_handler(router.reaction_pegs, router)
-        )
+    # ... registered unconditionally, because this same handler also dispatches
+    #     the PER-MESSAGE `on_reaction=` bindings that Context.send_message
+    #     stores in the message context. Those exist independently of any global
+    #     @router.reaction peg, so gating registration on `router.reaction_pegs`
+    #     made the per-message flow documented in docs/hacking.md ("How to handle
+    #     message reactions?") silently do nothing in an app that has no global
+    #     pegs -- which is exactly the app that documentation recommends writing.
+    application.add_handler(
+        _create_reaction_handler(router.reaction_pegs, router)
+    )
 
     # Callbacks:
     # ... TODO This is RUDIMENTARY as ALL callbacks should be processed by the bus!

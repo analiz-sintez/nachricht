@@ -36,6 +36,34 @@ from .. import (
 logger = logging.getLogger(__name__)
 
 
+def normalise_reaction_map(on_reaction: Dict, message_id=None) -> Dict:
+    """Coerce the keys of an `on_reaction` map to `Emoji` members.
+
+    The reaction dispatcher resolves an incoming Telegram reaction to an
+    `Emoji` (attach.py, via `Emoji.get`) and then looks it up in this map.
+    `Emoji` is a plain `Enum`, not a `str`-Enum, so a raw-symbol key such as
+    ``{"👎": signal}`` hashes differently from ``Emoji.THUMBSDOWN`` and could
+    never match -- yet that raw-symbol form is what docs/hacking.md documents.
+
+    Accept both spellings, and warn about a symbol `Emoji` does not know rather
+    than dropping it silently: a binding that never fires is otherwise
+    indistinguishable from a bot that is not running.
+    """
+    normalised = {}
+    for key, signals in on_reaction.items():
+        emoji = key if isinstance(key, Emoji) else Emoji.get(key)
+        if emoji is None:
+            logger.warning(
+                "Unknown reaction emoji %r for message id=%s: not a member of "
+                "Emoji, so this binding would never dispatch; ignoring it.",
+                key,
+                message_id,
+            )
+            continue
+        normalised[emoji] = signals
+    return normalised
+
+
 to_escape = r"[]()<>{}#+-=.!"
 escape_chars = re.compile(rf"""(\[.*?\]\(.*?\))|([{re.escape(to_escape)}])""")
 
@@ -435,7 +463,9 @@ class TelegramContext(Context):
             )
             if "_on_reaction" not in self.context(message):
                 self.context(message)["_on_reaction"] = {}
-            self.context(message)["_on_reaction"].update(on_reaction)
+            self.context(message)["_on_reaction"].update(
+                normalise_reaction_map(on_reaction, message_id=message.id)
+            )
         if on_command:
             logger.debug(
                 "Setting command handlers for message id=%s", message.id
