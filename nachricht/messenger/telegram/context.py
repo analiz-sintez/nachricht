@@ -27,9 +27,10 @@ from .. import (
     Account,
     Message,
     Chat,
-    Emoji,
+    Reaction,
     Conversation,
     AbstractContextStore,
+    normalise_reaction_map,
 )
 
 
@@ -357,7 +358,9 @@ class TelegramContext(Context):
         new: bool = False,
         reply_to: Optional[Union[Message, bool]] = None,
         on_reply: Optional[Signal] = None,
-        on_reaction: Optional[Dict[Emoji, Union[Signal, List[Signal]]]] = None,
+        on_reaction: Optional[
+            Dict[Reaction, Union[Signal, List[Signal]]]
+        ] = None,
         on_command: Optional[Dict[str, Union[Signal, List[Signal]]]] = None,
         context: Optional[Dict] = None,
         account: Optional[Account] = None,
@@ -435,7 +438,9 @@ class TelegramContext(Context):
             )
             if "_on_reaction" not in self.context(message):
                 self.context(message)["_on_reaction"] = {}
-            self.context(message)["_on_reaction"].update(on_reaction)
+            self.context(message)["_on_reaction"].update(
+                normalise_reaction_map(on_reaction, message_id=message.id)
+            )
         if on_command:
             logger.debug(
                 "Setting command handlers for message id=%s", message.id

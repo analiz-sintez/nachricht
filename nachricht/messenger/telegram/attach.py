@@ -47,7 +47,7 @@ from ..routing import (
     Conditions,
 )
 from .context import TelegramContext
-from .. import Message, Emoji
+from .. import Message, Emoji, Reaction
 
 logger = logging.getLogger(__name__)
 
@@ -273,11 +273,18 @@ def _create_reaction_handler(
         )
         # Check for new reactions.
         parent_ctx = ctx.context(parent)
-        emoji: Optional[Emoji] = None
+        emoji: Optional[Reaction] = None
         if hasattr(tg_parent, "new_reaction"):
             reactions = tg_parent.new_reaction
             if len(reactions) == 1 and hasattr(reactions[0], "emoji"):
-                emoji = Emoji.get(reactions[0].emoji)
+                # ... fall back to the raw symbol. `Emoji` declares a fraction
+                #     of the reactions Telegram allows, and
+                #     `normalise_reaction_map` keeps an undeclared one as a raw
+                #     symbol -- resolving to None here would drop exactly those
+                #     bindings again. Global pegs are unaffected: their map is
+                #     keyed by Emoji, which a raw symbol never matches.
+                symbol = reactions[0].emoji
+                emoji = Emoji.get(symbol, symbol)
             logger.info(f"Got emoji: {emoji}")
         # If no new reaction found, stop dispatching.
         if not emoji:
@@ -486,10 +493,16 @@ def attach_router(router: Router, application: Application):
     # Reactions:
     # ... this is a special case. PTB doesn't support dispatching on emoji types,
     #     so we register a single handler which does this dispatch.
-    if router.reaction_pegs:
-        application.add_handler(
-            _create_reaction_handler(router.reaction_pegs, router)
-        )
+    # ... registered unconditionally, because this same handler also dispatches
+    #     the PER-MESSAGE `on_reaction=` bindings that Context.send_message
+    #     stores in the message context. Those exist independently of any global
+    #     @router.reaction peg, so gating registration on `router.reaction_pegs`
+    #     made the per-message flow documented in docs/hacking.md ("How to handle
+    #     message reactions?") silently do nothing in an app that has no global
+    #     pegs -- which is exactly the app that documentation recommends writing.
+    application.add_handler(
+        _create_reaction_handler(router.reaction_pegs, router)
+    )
 
     # Callbacks:
     # ... TODO This is RUDIMENTARY as ALL callbacks should be processed by the bus!

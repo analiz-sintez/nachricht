@@ -28,7 +28,7 @@ from ..context import (
     Conversation,
     Chat,
     Keyboard,
-    Emoji,
+    Reaction,
 )
 
 
@@ -86,7 +86,9 @@ class YourMessengerContext(Context):
         new: bool = False,
         reply_to: Optional[Message] = None,
         on_reply: Optional[Signal] = None,
-        on_reaction: Optional[Dict[Emoji, Union[Signal, List[Signal]]]] = None,
+        on_reaction: Optional[
+            Dict[Reaction, Union[Signal, List[Signal]]]
+        ] = None,
         on_command: Optional[Dict[str, Union[Signal, List[Signal]]]] = None,
         context: Optional[Dict] = None,
         account: Optional[Account] = None,
@@ -112,6 +114,9 @@ class YourMessengerContext(Context):
           Signals to be emitted if a reaction is sent to the message.
           Reaction emojis are dict keys, values are Signals that should be emitted
           if such a reaction is recieved.
+          Pass the keys through `normalise_reaction_map` before storing them,
+          and resolve an incoming symbol the same way, so that both `Emoji`
+          members and raw symbols dispatch.
           If a list of signals is provided, they are called one after one (not
           simultaneously), each next Signal awaits for the previous to be processed.
         on_command:
