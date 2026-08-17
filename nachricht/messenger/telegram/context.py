@@ -27,7 +27,7 @@ from .. import (
     Account,
     Message,
     Chat,
-    Emoji,
+    Reaction,
     Conversation,
     AbstractContextStore,
     normalise_reaction_map,
@@ -358,7 +358,9 @@ class TelegramContext(Context):
         new: bool = False,
         reply_to: Optional[Union[Message, bool]] = None,
         on_reply: Optional[Signal] = None,
-        on_reaction: Optional[Dict[Emoji, Union[Signal, List[Signal]]]] = None,
+        on_reaction: Optional[
+            Dict[Reaction, Union[Signal, List[Signal]]]
+        ] = None,
         on_command: Optional[Dict[str, Union[Signal, List[Signal]]]] = None,
         context: Optional[Dict] = None,
         account: Optional[Account] = None,

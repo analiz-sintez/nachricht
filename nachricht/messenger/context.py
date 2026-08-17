@@ -42,8 +42,8 @@ class Emoji(Enum):
 
     @classmethod
     def get(
-        cls, symbol: str, default: Optional["Emoji"] = None
-    ) -> Optional["Emoji"]:
+        cls, symbol: str, default: Optional[Union["Emoji", str]] = None
+    ) -> Optional[Union["Emoji", str]]:
         """
         Get an Emoji by the emoji symbol or return `default` if the symbol
         is not found.
@@ -90,31 +90,43 @@ class Emoji(Enum):
     POOP = "💩"
 
 
-def normalise_reaction_map(on_reaction: Dict, message_id=None) -> Dict:
-    """Coerce the keys of an `on_reaction` map to `Emoji` members.
+Reaction = Union[Emoji, str]
+"""A reaction: an `Emoji` member, or the raw symbol of one it doesn't declare."""
 
-    A messenger backend resolves an incoming reaction to an `Emoji` (via
-    `Emoji.get`) and then looks it up in this map.
-    `Emoji` is a plain `Enum`, not a `str`-Enum, so a raw-symbol key such as
-    ``{"👎": signal}`` hashes differently from ``Emoji.THUMBSDOWN`` and could
-    never match -- yet that raw-symbol form is what docs/hacking.md documents.
 
-    Accept both spellings, and warn about a symbol `Emoji` does not know rather
-    than dropping it silently: a binding that never fires is otherwise
-    indistinguishable from a bot that is not running.
+def normalise_reaction_map(
+    on_reaction: Dict[Reaction, Union[Signal, List[Signal]]],
+    message_id: Optional[int] = None,
+) -> Dict[Reaction, Union[Signal, List[Signal]]]:
+    """Coerce the keys of an `on_reaction` map to what the dispatcher looks up.
+
+    A messenger backend resolves an incoming reaction to an `Emoji` and then
+    looks that up in this map. `Emoji` is a plain `Enum`, not a `str`-Enum, so
+    a raw-symbol key such as ``{"👎": signal}`` hashes differently from
+    ``Emoji.THUMBSDOWN`` and could never match -- yet that raw-symbol form is
+    what docs/hacking.md documents. Accept both spellings.
+
+    A symbol `Emoji` does not declare is kept as a raw symbol rather than
+    dropped: the enum covers a fraction of what a messenger may deliver as a
+    reaction, so dropping would disable a binding the app author had every
+    reason to expect to work. The backend must resolve an unknown incoming
+    symbol the same way for such a binding to fire.
     """
     normalised = {}
     for key, signals in on_reaction.items():
-        emoji = key if isinstance(key, Emoji) else Emoji.get(key)
-        if emoji is None:
+        if isinstance(key, Emoji):
+            normalised[key] = signals
+            continue
+        reaction = Emoji.get(key, key)
+        if not isinstance(reaction, Emoji):
             logger.warning(
-                "Unknown reaction emoji %r for message id=%s: not a member of "
-                "Emoji, so this binding would never dispatch; ignoring it.",
+                "Reaction %r bound to message id=%s is not a member of Emoji; "
+                "keeping it as a raw symbol, which dispatches only on an "
+                "exact match.",
                 key,
                 message_id,
             )
-            continue
-        normalised[emoji] = signals
+        normalised[reaction] = signals
     return normalised
 
 
@@ -222,7 +234,9 @@ class Context:
         new: bool = False,
         reply_to: Optional[Message] = None,
         on_reply: Optional[Signal] = None,
-        on_reaction: Optional[Dict[Emoji, Union[Signal, List[Signal]]]] = None,
+        on_reaction: Optional[
+            Dict[Reaction, Union[Signal, List[Signal]]]
+        ] = None,
         on_command: Optional[Dict[str, Union[Signal, List[Signal]]]] = None,
         context: Optional[Dict] = None,
         account: Optional[Account] = None,
@@ -248,6 +262,9 @@ class Context:
           Signals to be emitted if a reaction is sent to the message.
           Reaction emojis are dict keys, values are Signals that should be emitted
           if such a reaction is recieved.
+          A key may be an `Emoji` member or the raw symbol (`Emoji.THUMBSDOWN`
+          and `"👎"` are equivalent); a symbol `Emoji` doesn't declare is kept
+          and dispatches on an exact match. See `normalise_reaction_map`.
           If a list of signals is provided, they are called one after one (not
           simultaneously), each next Signal awaits for the previous to be processed.
         on_command:

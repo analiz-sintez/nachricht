@@ -47,7 +47,7 @@ from ..routing import (
     Conditions,
 )
 from .context import TelegramContext
-from .. import Message, Emoji
+from .. import Message, Emoji, Reaction
 
 logger = logging.getLogger(__name__)
 
@@ -273,11 +273,18 @@ def _create_reaction_handler(
         )
         # Check for new reactions.
         parent_ctx = ctx.context(parent)
-        emoji: Optional[Emoji] = None
+        emoji: Optional[Reaction] = None
         if hasattr(tg_parent, "new_reaction"):
             reactions = tg_parent.new_reaction
             if len(reactions) == 1 and hasattr(reactions[0], "emoji"):
-                emoji = Emoji.get(reactions[0].emoji)
+                # ... fall back to the raw symbol. `Emoji` declares a fraction
+                #     of the reactions Telegram allows, and
+                #     `normalise_reaction_map` keeps an undeclared one as a raw
+                #     symbol -- resolving to None here would drop exactly those
+                #     bindings again. Global pegs are unaffected: their map is
+                #     keyed by Emoji, which a raw symbol never matches.
+                symbol = reactions[0].emoji
+                emoji = Emoji.get(symbol, symbol)
             logger.info(f"Got emoji: {emoji}")
         # If no new reaction found, stop dispatching.
         if not emoji:
