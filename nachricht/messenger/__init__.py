@@ -17,6 +17,7 @@ from .context import (
     Button,
     Keyboard,
     Emoji,
+    normalise_reaction_map,
 )
 
 router: Optional[Router] = None

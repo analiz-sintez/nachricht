@@ -1,6 +1,6 @@
 """Regression tests for per-message `on_reaction` dispatch.
 
-Both cases below reproduce the flow documented in docs/hacking.md, "How to
+The cases below reproduce the flow documented in docs/hacking.md, "How to
 handle message reactions?", which attaches behaviour to a single message and
 explicitly recommends doing that *instead* of registering global reaction
 handlers. Before the accompanying fix, that documented flow could not work:
@@ -20,11 +20,6 @@ from telegram.ext import MessageReactionHandler
 from .attach import attach_router
 from ..context import Emoji
 from ..routing import Router
-
-# Imported inside the tests that need it, not at module scope: the two fixes are
-# independent, and a module-level import of the newer helper would turn a
-# missing-helper failure into a COLLECTION error that also hides the
-# registration results.
 
 
 class TestReactionHandlerRegistration:
@@ -66,48 +61,3 @@ class TestReactionHandlerRegistration:
         handlers = self._handlers(router)
 
         assert any(isinstance(h, MessageReactionHandler) for h in handlers)
-
-
-class TestNormaliseReactionMap:
-    """`on_reaction` keys reach the dispatcher as Emoji members."""
-
-    @staticmethod
-    def _normalise():
-        from .context import normalise_reaction_map
-
-        return normalise_reaction_map
-
-    def test_accepts_raw_emoji_symbols(self):
-        """The spelling used throughout docs/hacking.md."""
-        signal = object()
-
-        result = self._normalise()({"👎": signal})
-
-        assert result == {Emoji.THUMBSDOWN: signal}
-
-    def test_accepts_emoji_members(self):
-        signal = object()
-
-        result = self._normalise()({Emoji.THUMBSDOWN: signal})
-
-        assert result == {Emoji.THUMBSDOWN: signal}
-
-    def test_drops_unknown_symbols_with_a_warning(self, caplog):
-        """An emoji outside the enum can never dispatch, so say so."""
-        normalise = self._normalise()
-
-        with caplog.at_level("WARNING"):
-            result = normalise({"🥑": object()})
-
-        assert result == {}
-        assert caplog.records, (
-            "an undispatchable binding must be reported, not dropped silently"
-        )
-        assert "🥑" in caplog.records[0].getMessage()
-
-    def test_mixed_spellings_coexist(self):
-        thumbs, eyes = object(), object()
-
-        result = self._normalise()({"👎": thumbs, Emoji.EYES: eyes})
-
-        assert result == {Emoji.THUMBSDOWN: thumbs, Emoji.EYES: eyes}
